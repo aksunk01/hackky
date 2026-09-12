@@ -52,10 +52,12 @@ export function startListening(
   return () => recognition.stop();
 }
 
-export function speak(text: string) {
+export function speak(text: string, rate = 1.25) {
   if (!isSpeechSynthesisSupported()) return;
   window.speechSynthesis.cancel();
-  window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.rate = rate;
+  window.speechSynthesis.speak(utterance);
 }
 
 export function stopSpeaking() {
