@@ -8,6 +8,7 @@ import type { ExecutionResult } from "@/lib/execute";
 import { LANGUAGES, type Language } from "@/lib/languages";
 import { Button, DifficultyBadge, Logo } from "@/components/ui";
 import { formatClock, timerConfigFromSearch, type TimerConfig } from "@/lib/timer";
+import { looksRandom } from "@/lib/noise";
 import {
   isInterviewerSpeaking,
   isMicrophoneRecordingSupported,
@@ -232,6 +233,12 @@ export default function InterviewPage({
   const messagesRef = useRef(messages);
   const codeAtLastCheck = useRef(problem?.starterCode[language] ?? "");
   const talkedSinceLastCheck = useRef(false);
+  // A transcript in progress hasn't reached sendMessage/talkedSinceLastCheck
+  // yet, so the interval needs its own live read of "is someone talking
+  // right now" — otherwise a tick landing mid-sentence looks identical to
+  // silence and the checker barges in over the candidate.
+  const partialRef = useRef(partial);
+  const interviewerSpeakingRef = useRef(interviewerSpeaking);
   // Same reason as sendMessageRef: the interval below is set up once, but
   // askInterviewer closes over whichever code/messages were current the
   // render it was defined in, so the interval must call through a ref that's
@@ -253,12 +260,23 @@ export default function InterviewPage({
     messagesRef.current = messages;
   }, [messages]);
 
+  useEffect(() => {
+    partialRef.current = partial;
+  }, [partial]);
+
+  useEffect(() => {
+    interviewerSpeakingRef.current = interviewerSpeaking;
+  }, [interviewerSpeaking]);
+
   // Every couple of minutes, independent of whether anything else prompted a
   // reply, Alex looks at the editor and decides whether the candidate needs a
   // nudge — whether they've gone quiet or have been typing down a bad path.
   useEffect(() => {
     if (!problem) return;
     const interval = setInterval(() => {
+      // Mid-utterance or mid-reply: retained for the next tick rather than
+      // lost, same as the busy.current case below — never talk over someone.
+      if (partialRef.current || interviewerSpeakingRef.current) return;
       if (busy.current) return; // retained for the next tick rather than lost
       const talked = talkedSinceLastCheck.current;
       const typed = hasMeaningfulChange(codeRef.current, codeAtLastCheck.current);
@@ -309,6 +327,10 @@ export default function InterviewPage({
     const stop = startListening({
       onResult: (transcript) => {
         setPartial("");
+        // Dropped before it ever becomes a chat turn or a network call — an
+        // always-on mic transcribes coughs and room noise, and the candidate
+        // never said anything that should count as part of the interview.
+        if (looksRandom(transcript)) return;
         sendMessageRef.current(transcript);
       },
       // Shown live while the words are still coming out.

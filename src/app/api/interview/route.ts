@@ -8,6 +8,7 @@ import {
 import { getProblem } from "@/lib/problems";
 import { generateText, isQuotaError, type ChatTurn } from "@/lib/gemini";
 import type { ExecutionResult } from "@/lib/execute";
+import { looksRandom } from "@/lib/noise";
 
 const MOCK_REPLIES = [
   "Sounds good — before you dive into code, can you walk me through your approach and its time complexity?",
@@ -20,39 +21,11 @@ const MOCK_REPLIES = [
 /**
  * The reply for anything that isn't a real answer — mic noise, filler, or an
  * off-topic remark. Steering back to complexity beats reacting to nonsense.
+ * Kept as a backstop for whatever slips past the client-side noise filter
+ * (e.g. a fluent but off-topic sentence, which looksRandom can't catch).
  */
 const DEFLECT_REPLY =
   "Makes sense. Is there anything you'd change about the time or space complexity if the input were much larger?";
-
-/** Words that carry no interview content on their own. */
-const FILLER_WORDS = new Set([
-  "um", "uh", "erm", "hmm", "mhm", "huh", "ah", "oh", "eh",
-  "ok", "okay", "yeah", "yep", "yes", "no", "nope", "nah", "sure", "right",
-  "hi", "hello", "hey", "cool", "nice", "great", "thanks", "wait", "sorry",
-  "alright", "anyway", "so", "well", "like", "test", "testing",
-]);
-
-/**
- * Catches input that plainly isn't an answer, before spending a model call on
- * it. An always-on mic transcribes coughs, keyboard noise and half-words, and
- * feeding those to the interviewer produces a reply to nothing. Semantic
- * randomness (a fluent but off-topic sentence) is left to the model, which is
- * instructed to deflect the same way.
- */
-function looksRandom(text: string): boolean {
-  const trimmed = text.trim().toLowerCase();
-  if (trimmed.length < 3) return true;
-
-  const words = trimmed.split(/[^a-z0-9'+\-*/=_<>[\]().]+/).filter(Boolean);
-  if (words.length === 0) return true;
-  if (words.length <= 3 && words.every((word) => FILLER_WORDS.has(word))) return true;
-
-  // Room noise tends to transcribe as one long vowel-less run of letters.
-  const [only] = words;
-  if (words.length === 1 && only!.length > 10 && !/[aeiouy]/.test(only!)) return true;
-
-  return false;
-}
 
 /** What the candidate did in the editor, when it wasn't them talking. */
 type InterviewEvent = "run" | "code-review" | "periodic-check";
