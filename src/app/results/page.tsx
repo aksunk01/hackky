@@ -71,7 +71,15 @@ export default function ResultsPage() {
     <main className="flex-1 flex flex-col items-center px-6 py-16">
       <div className="w-full max-w-md">
         <h1 className="text-2xl font-bold text-center mb-1">Interview Complete!</h1>
-        <p className="text-center text-black/50 dark:text-white/50 mb-8">{result.problem}</p>
+        <p className="text-center text-black/50 dark:text-white/50 mb-4">{result.problem}</p>
+
+        {result.mocked && (
+          <div className="rounded-lg border border-amber-400 bg-amber-50 dark:bg-amber-950/40 dark:border-amber-700 text-amber-800 dark:text-amber-300 text-sm px-4 py-3 mb-6">
+            <strong>Demo-mode scoring.</strong> Gemini didn&apos;t respond (missing key, or
+            quota exhausted), so these scores come from a rough fallback formula based on
+            test pass rate and chat activity — not real AI judgment of your reasoning.
+          </div>
+        )}
 
         <div className="flex justify-center mb-8">
           <div className="relative w-32 h-32 rounded-full border-8 border-blue-500 flex items-center justify-center">
@@ -98,12 +106,6 @@ export default function ResultsPage() {
         </div>
 
         <div className="rounded-xl bg-black/5 dark:bg-white/5 p-4 text-sm mb-8">{evaluation.feedback}</div>
-
-        {result.mocked && (
-          <p className="text-xs text-amber-600 dark:text-amber-400 text-center mb-4">
-            Demo mode: set GEMINI_API_KEY for AI-generated interviewing &amp; scoring.
-          </p>
-        )}
 
         <div className="flex gap-3">
           <button

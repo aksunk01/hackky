@@ -19,24 +19,57 @@ function clamp10(n: number): number {
   return Math.max(0, Math.min(10, Math.round(n)));
 }
 
-function buildFallbackEvaluation(passed: number, total: number): Evaluation {
+const COMPLEXITY_TALK = /\bo\([^)]*\)|time complexity|space complexity|big[\s-]?o\b/i;
+
+function buildFallbackEvaluation(
+  passed: number,
+  total: number,
+  history: ChatTurn[]
+): Evaluation {
+  const userTurns = history.filter((t) => t.role === "user");
+  const userChars = userTurns.reduce((sum, t) => sum + t.text.trim().length, 0);
+  const discussedComplexity = userTurns.some((t) => COMPLEXITY_TALK.test(t.text));
+
   const correctness = total > 0 ? clamp10((passed / total) * 10) : 0;
-  const base = total > 0 ? Math.round((passed / total) * 7) + 1 : 4;
+  const codingBase = total > 0 ? Math.round((passed / total) * 7) + 1 : 4;
+
+  // Engagement is a rough proxy for communication: near-silence caps the score low,
+  // regardless of how well the code itself scores, rather than mirroring codingBase.
+  const communication = clamp10(
+    Math.min(9, 1 + userTurns.length * 1.5 + Math.min(userChars / 80, 3))
+  );
+  const problemSolving = clamp10(codingBase - (userTurns.length === 0 ? 2 : 0));
+  const complexityAnalysis = clamp10(discussedComplexity ? codingBase : 3);
+  const codeQuality = clamp10(codingBase - (passed < total ? 1 : 0));
+  const debugging = clamp10(codingBase);
+
   const overall = Math.round(
-    ((correctness + base * 4) / 5) * 10
-  ) / 10;
+    (correctness + problemSolving + communication + codeQuality + complexityAnalysis + debugging) *
+      (100 / 60)
+  );
+
+  const feedbackParts: string[] = [
+    passed === total
+      ? "All test cases passed."
+      : `${passed}/${total} test cases passed — check edge cases and re-verify your logic.`,
+  ];
+  if (userTurns.length === 0) {
+    feedbackParts.push(
+      "You didn't discuss your approach with the interviewer at all — talking through your reasoning out loud is a big part of a real interview and this scores it low."
+    );
+  } else if (!discussedComplexity) {
+    feedbackParts.push("Consider explicitly stating time/space complexity next time.");
+  }
+
   return {
-    overall: Math.round(overall * 10),
-    problemSolving: clamp10(base),
-    communication: clamp10(base),
+    overall,
+    problemSolving,
+    communication,
     correctness,
-    codeQuality: clamp10(base - (passed < total ? 1 : 0)),
-    complexityAnalysis: clamp10(base - 1),
-    debugging: clamp10(base),
-    feedback:
-      passed === total
-        ? "Solid work — all test cases passed. Consider narrating your complexity analysis more explicitly next time."
-        : "Some test cases failed. Focus on edge cases (empty input, duplicates, boundaries) and re-check your logic against the examples.",
+    codeQuality,
+    complexityAnalysis,
+    debugging,
+    feedback: feedbackParts.join(" "),
   };
 }
 
@@ -61,7 +94,7 @@ export async function POST(request: Request) {
   }
 
   const execResult = await runPython(problem, code);
-  const fallback = buildFallbackEvaluation(execResult.passed, execResult.total);
+  const fallback = buildFallbackEvaluation(execResult.passed, execResult.total, history ?? []);
 
   const transcript = (history ?? [])
     .map((t) => `${t.role === "user" ? "Candidate" : "Interviewer"}: ${t.text}`)
