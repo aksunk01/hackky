@@ -1,7 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import Link from "next/link";
+import { LinkButton, Button, SiteHeader } from "@/components/ui";
 import type { Evaluation } from "@/app/api/evaluate/route";
 
 type StoredResult = {
@@ -38,15 +38,21 @@ export default function ResultsPage() {
   if (!result) {
     return (
       <main className="flex-1 flex flex-col items-center justify-center gap-4">
-        <p className="text-black/60 dark:text-white/60">No completed interview found.</p>
-        <Link href="/problems" className="text-blue-600 hover:underline">
+        <p className="text-muted">No completed interview found.</p>
+        <LinkButton href="/problems" size="sm">
           Start a new interview
-        </Link>
+        </LinkButton>
       </main>
     );
   }
 
   const { evaluation } = result;
+  const scoreTone =
+    evaluation.overall >= 80
+      ? "text-success border-success"
+      : evaluation.overall >= 50
+        ? "text-warning border-warning"
+        : "text-danger border-danger";
 
   function downloadReport() {
     const lines = [
@@ -68,56 +74,57 @@ export default function ResultsPage() {
   }
 
   return (
-    <main className="flex-1 flex flex-col items-center px-6 py-16">
-      <div className="w-full max-w-md">
-        <h1 className="text-2xl font-bold text-center mb-1">Interview Complete!</h1>
-        <p className="text-center text-black/50 dark:text-white/50 mb-8">{result.problem}</p>
+    <main className="flex-1 flex flex-col">
+      <SiteHeader />
+      <div className="flex-1 flex flex-col items-center px-6 py-14 sm:py-16">
+        <div className="w-full max-w-md animate-fade-up">
+          <h1 className="text-2xl sm:text-3xl font-bold text-center tracking-tight mb-1">
+            Interview Complete
+          </h1>
+          <p className="text-center text-muted mb-8">{result.problem}</p>
 
-        <div className="flex justify-center mb-8">
-          <div className="relative w-32 h-32 rounded-full border-8 border-blue-500 flex items-center justify-center">
-            <span className="text-3xl font-bold">{evaluation.overall}</span>
-          </div>
-        </div>
-        <p className="text-center text-xs text-black/40 dark:text-white/40 -mt-6 mb-8">Overall Score</p>
-
-        <div className="flex flex-col gap-3 mb-8">
-          {METRICS.map((m) => (
-            <div key={m.key} className="flex items-center gap-3">
-              <span className="w-40 text-sm">{m.label}</span>
-              <div className="flex-1 h-2 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
-                <div
-                  className="h-full bg-blue-500"
-                  style={{ width: `${(Number(evaluation[m.key]) / 10) * 100}%` }}
-                />
-              </div>
-              <span className="w-10 text-right text-sm text-black/60 dark:text-white/60">
-                {evaluation[m.key]}/10
-              </span>
+          <div className="flex justify-center mb-2">
+            <div
+              className={`relative w-32 h-32 rounded-full border-8 flex items-center justify-center bg-card ${scoreTone}`}
+            >
+              <span className="text-3xl font-bold text-foreground">{evaluation.overall}</span>
             </div>
-          ))}
-        </div>
+          </div>
+          <p className="text-center text-xs text-muted mb-8 uppercase tracking-wide">Overall Score</p>
 
-        <div className="rounded-xl bg-black/5 dark:bg-white/5 p-4 text-sm mb-8">{evaluation.feedback}</div>
+          <div className="flex flex-col gap-3 mb-8 rounded-2xl border border-border bg-card p-5">
+            {METRICS.map((m) => (
+              <div key={m.key} className="flex items-center gap-3">
+                <span className="w-36 sm:w-40 text-sm shrink-0">{m.label}</span>
+                <div className="flex-1 h-2 rounded-full bg-subtle overflow-hidden">
+                  <div
+                    className="h-full bg-accent rounded-full transition-all"
+                    style={{ width: `${(Number(evaluation[m.key]) / 10) * 100}%` }}
+                  />
+                </div>
+                <span className="w-10 text-right text-sm text-muted">{evaluation[m.key]}/10</span>
+              </div>
+            ))}
+          </div>
 
-        {result.mocked && (
-          <p className="text-xs text-amber-600 dark:text-amber-400 text-center mb-4">
-            Demo mode: set GEMINI_API_KEY for AI-generated interviewing &amp; scoring.
-          </p>
-        )}
+          <div className="rounded-2xl bg-card border border-border p-4 text-sm leading-relaxed mb-8">
+            {evaluation.feedback}
+          </div>
 
-        <div className="flex gap-3">
-          <button
-            onClick={downloadReport}
-            className="flex-1 rounded-full bg-blue-600 text-white py-2.5 font-medium hover:bg-blue-700"
-          >
-            Download Report
-          </button>
-          <Link
-            href="/problems"
-            className="flex-1 text-center rounded-full border border-black/10 dark:border-white/10 py-2.5 font-medium hover:bg-black/5 dark:hover:bg-white/10"
-          >
-            Try Another
-          </Link>
+          {result.mocked && (
+            <p className="text-xs text-warning text-center mb-4">
+              Demo mode: set GEMINI_API_KEY for AI-generated interviewing &amp; scoring.
+            </p>
+          )}
+
+          <div className="flex gap-3">
+            <Button onClick={downloadReport} className="flex-1">
+              Download Report
+            </Button>
+            <LinkButton href="/problems" variant="secondary" className="flex-1">
+              Try Another
+            </LinkButton>
+          </div>
         </div>
       </div>
     </main>
