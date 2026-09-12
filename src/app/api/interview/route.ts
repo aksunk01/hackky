@@ -1,4 +1,10 @@
 import { NextResponse } from "next/server";
+import {
+  DEFAULT_LANGUAGE,
+  isLanguage,
+  languageLabel,
+  type Language,
+} from "@/lib/languages";
 import { getProblem } from "@/lib/problems";
 import { generateText, isQuotaError, type ChatTurn } from "@/lib/gemini";
 import type { ExecutionResult } from "@/lib/execute";
@@ -74,24 +80,32 @@ function describeTestResult(result: ExecutionResult): string {
 function buildSystemInstruction(
   problem: NonNullable<ReturnType<typeof getProblem>>,
   code: string,
-  testResult: ExecutionResult | null
+  testResult: ExecutionResult | null,
+  language: Language
 ) {
   return `You are Alex, a friendly but rigorous AI technical interviewer conducting a live coding interview.
 
 Problem: ${problem.title} (${problem.difficulty})
 ${problem.description}
 
-The candidate's editor contains exactly this, right now:
-\`\`\`python
+The candidate is solving it in ${languageLabel(language)}. Their editor contains
+exactly this, right now:
+\`\`\`${language}
 ${code.trim() || "(the editor is still empty)"}
 \`\`\`
 ${testResult ? `\nMost recent run of that code:\n${describeTestResult(testResult)}\n` : ""}
 Guidelines:
 - Keep replies short and conversational (2-4 sentences), like a real spoken interview.
+- This reply is spoken aloud by text-to-speech, not rendered as text. Never use
+  LaTeX or markdown math (no $...$, no ^ for exponents, no \\times or \\cdot).
+  Say complexity the way you'd say it out loud: "O of n squared", "O of n log n",
+  "constant time" — plain words, not symbols.
 - You can see the editor. Ground your feedback in what is actually written there:
   name the variable, function, loop or missing branch you mean, and comment on
   changes they've made since your last message. Never claim you cannot see their code.
 - If the code is empty or unchanged, ask about their approach instead of inventing detail.
+- Judge it as ${languageLabel(language)} code: use that language's idioms, standard
+  library and pitfalls, and never suggest another language's syntax.
 - Point out real bugs, missing edge cases and complexity problems in their code, but
   nudge — ask a question that leads them to it rather than handing over the fix.
 - Ask the candidate to explain their approach before or while they code.
@@ -118,12 +132,13 @@ ask about an edge case or the complexity. Don't repeat feedback you've already g
 
 export async function POST(request: Request) {
   const body = await request.json();
-  const { problemId, history, code, testResult, event } = body as {
+  const { problemId, history, code, testResult, event, language } = body as {
     problemId?: string;
     history?: ChatTurn[];
     code?: string;
     testResult?: ExecutionResult | null;
     event?: InterviewEvent;
+    language?: string;
   };
 
   if (!problemId) {
@@ -157,7 +172,12 @@ export async function POST(request: Request) {
   let quotaHit = false;
   try {
     const reply = await generateText(
-      buildSystemInstruction(problem, code ?? "", testResult ?? null),
+      buildSystemInstruction(
+        problem,
+        code ?? "",
+        testResult ?? null,
+        isLanguage(language) ? language : DEFAULT_LANGUAGE
+      ),
       contents
     );
     if (reply) {

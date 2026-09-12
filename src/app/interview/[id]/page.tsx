@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Editor from "@monaco-editor/react";
 import { getProblem } from "@/lib/problems";
 import type { ExecutionResult } from "@/lib/execute";
+import { LANGUAGES, type Language } from "@/lib/languages";
 import { Button, DifficultyBadge, Logo } from "@/components/ui";
 import { formatClock, timerConfigFromSearch, type TimerConfig } from "@/lib/timer";
 import {
@@ -61,6 +62,101 @@ function hasMeaningfulChange(next: string, seen: string): boolean {
   return a !== b && Math.abs(a.length - b.length) >= MIN_CODE_DELTA;
 }
 
+/**
+ * A pill trigger with a per-language color dot, opening a small menu — reads
+ * as a real language switcher rather than a plain form control sitting in the
+ * editor's header.
+ */
+function LanguagePicker({
+  languages,
+  value,
+  onChange,
+}: {
+  languages: { id: Language; label: string; color: string }[];
+  value: Language;
+  onChange: (next: Language) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const current = languages.find((lang) => lang.id === value) ?? languages[0];
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(e: MouseEvent) {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  if (!current) return null;
+
+  return (
+    <div className="relative" ref={rootRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className="flex items-center gap-2 rounded-full border border-border-strong bg-subtle pl-2.5 pr-2 py-1.5 text-sm font-medium hover:bg-border-strong/60 transition-colors"
+      >
+        <span
+          className="h-2 w-2 rounded-full shrink-0"
+          style={{ background: current.color }}
+          aria-hidden
+        />
+        {current.label}
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          fill="none"
+          className={`text-muted transition-transform ${open ? "rotate-180" : ""}`}
+          aria-hidden
+        >
+          <path d="M2.5 4.5L6 8l3.5-3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          role="listbox"
+          className="absolute left-0 top-[calc(100%+6px)] z-10 w-44 rounded-xl border border-border bg-card p-1 shadow-lg animate-fade-up"
+        >
+          {languages.map((lang) => (
+            <button
+              key={lang.id}
+              type="button"
+              role="option"
+              aria-selected={lang.id === value}
+              onClick={() => {
+                onChange(lang.id);
+                setOpen(false);
+              }}
+              className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm transition-colors ${
+                lang.id === value ? "bg-subtle font-medium" : "hover:bg-subtle"
+              }`}
+            >
+              <span
+                className="h-2 w-2 rounded-full shrink-0"
+                style={{ background: lang.color }}
+                aria-hidden
+              />
+              {lang.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function InterviewPage({
   params,
 }: {
@@ -70,7 +166,16 @@ export default function InterviewPage({
   const problem = getProblem(id);
   const router = useRouter();
 
-  const [code, setCode] = useState(problem?.starterCode ?? "");
+  // Only offer languages this problem actually has starter code for.
+  const availableLanguages = LANGUAGES.filter((lang) => problem?.starterCode[lang.id]);
+  const [language, setLanguage] = useState<Language>(
+    availableLanguages[0]?.id ?? "python"
+  );
+  // Kept per language so switching back doesn't throw away an attempt.
+  const [drafts, setDrafts] = useState<Partial<Record<Language, string>>>(
+    () => ({ ...problem?.starterCode })
+  );
+  const code = drafts[language] ?? "";
   const [messages, setMessages] = useState<ChatTurn[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
@@ -106,7 +211,7 @@ export default function InterviewPage({
   const greeted = useRef(false);
   // The editor contents Alex has already commented on, so an idle review only
   // fires for code he hasn't seen.
-  const reviewedCode = useRef(problem?.starterCode ?? "");
+  const reviewedCode = useRef(problem?.starterCode[language] ?? "");
   // State, but read from timers and callbacks that mustn't wait for a render.
   const busy = useRef(false);
   // The listener is started once and outlives many renders, so its callback has
@@ -227,6 +332,7 @@ export default function InterviewPage({
           problemId: problem!.id,
           history: options.history,
           code,
+          language,
           testResult: options.result ?? testResult,
           event: options.event,
         }),
@@ -263,6 +369,18 @@ export default function InterviewPage({
     });
   }
 
+  function setCode(next: string) {
+    setDrafts((prev) => ({ ...prev, [language]: next }));
+  }
+
+  function switchLanguage(next: Language) {
+    // Alex hasn't seen the other buffer, but swapping languages isn't itself
+    // progress worth interrupting him for — and the old run no longer applies.
+    reviewedCode.current = drafts[next] ?? "";
+    setTestResult(null);
+    setLanguage(next);
+  }
+
   async function runCode() {
     setRunning(true);
     setTestResult(null);
@@ -270,7 +388,7 @@ export default function InterviewPage({
       const res = await fetch("/api/execute", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ problemId: problem!.id, code }),
+        body: JSON.stringify({ problemId: problem!.id, code, language }),
       });
       const data = (await res.json()) as ExecutionResult;
       setTestResult(data);
@@ -290,7 +408,12 @@ export default function InterviewPage({
       const res = await fetch("/api/evaluate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ problemId: problem!.id, history: messages, code }),
+        body: JSON.stringify({
+          problemId: problem!.id,
+          history: messages,
+          code,
+          language,
+        }),
       });
       const data = await res.json();
       sessionStorage.setItem(
@@ -372,7 +495,11 @@ export default function InterviewPage({
         {/* Code editor */}
         <section className="flex flex-col rounded-2xl border border-border bg-card overflow-hidden">
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-border">
-            <span className="text-sm font-medium text-muted">Python 3</span>
+            <LanguagePicker
+              languages={availableLanguages}
+              value={language}
+              onChange={switchLanguage}
+            />
             <Button variant="secondary" size="sm" onClick={runCode} disabled={running}>
               {running ? "Running…" : "Run"}
             </Button>
@@ -380,7 +507,7 @@ export default function InterviewPage({
           <div className="flex-1 min-h-0">
             <Editor
               height="100%"
-              language="python"
+              language={language}
               theme="vs-dark"
               value={code}
               onChange={(v) => setCode(v ?? "")}
