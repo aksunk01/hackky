@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui";
 import { metrics, type InterviewSession } from "@/lib/interview-session-types";
 
 export default function DownloadReport({ session }: { session: InterviewSession }) {
@@ -36,8 +37,8 @@ export default function DownloadReport({ session }: { session: InterviewSession 
   }
 
   return (
-    <button onClick={download} className="rounded-full bg-blue-600 text-white px-5 py-2.5 font-medium hover:bg-blue-700">
+    <Button onClick={download}>
       Download Report
-    </button>
+    </Button>
   );
 }

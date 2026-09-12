@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Editor from "@monaco-editor/react";
 import { getProblem } from "@/lib/problems";
 import type { ExecutionResult } from "@/lib/execute";
+import { Button, DifficultyBadge, Logo } from "@/components/ui";
 import {
   isInterviewerSpeaking,
   isMicrophoneRecordingSupported,
@@ -185,7 +186,7 @@ export default function InterviewPage({
   if (!problem) {
     return (
       <main className="flex-1 flex items-center justify-center">
-        <p className="text-black/60 dark:text-white/60">Problem not found.</p>
+        <p className="text-muted">Problem not found.</p>
       </main>
     );
   }
@@ -315,194 +316,225 @@ export default function InterviewPage({
   const mutedForSpeaking = listening && interviewerSpeaking;
 
   return (
-    <main className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,1fr)] gap-4 p-4 h-screen overflow-hidden">
-      {/* Problem description */}
-      <section className="flex flex-col rounded-xl border border-black/10 dark:border-white/10 overflow-y-auto p-5">
-        <div className="flex items-center gap-2 mb-1">
-          <h1 className="font-semibold text-lg">{problem.title}</h1>
-          <span className="text-xs text-green-600 dark:text-green-400">{problem.difficulty}</span>
+    <div className="flex flex-col h-screen overflow-hidden">
+      {/* Slim workspace bar: orientation without competing with the task at hand. */}
+      <header className="flex items-center justify-between px-4 sm:px-5 py-2.5 border-b border-border shrink-0">
+        <div className="flex items-center gap-3 min-w-0">
+          <Logo />
+          <span className="text-muted/50">/</span>
+          <span className="font-medium text-sm truncate">{problem.title}</span>
+          <DifficultyBadge level={problem.difficulty} />
         </div>
-        <p className="text-xs text-black/40 dark:text-white/40 mb-4">{problem.tags}</p>
-        <p className="text-sm leading-relaxed mb-4 whitespace-pre-wrap">{problem.description}</p>
-
-        <h2 className="text-sm font-semibold mb-2">Examples</h2>
-        <div className="flex flex-col gap-3 mb-4">
-          {problem.examples.map((ex, i) => (
-            <div key={i} className="text-xs bg-black/5 dark:bg-white/5 rounded-lg p-3 font-mono">
-              <div>Input: {ex.input}</div>
-              <div>Output: {ex.output}</div>
-              {ex.explanation && <div className="text-black/50 dark:text-white/50">{ex.explanation}</div>}
-            </div>
-          ))}
-        </div>
-
-        <h2 className="text-sm font-semibold mb-2">Constraints</h2>
-        <ul className="text-xs list-disc pl-4 text-black/60 dark:text-white/60 space-y-1">
-          {problem.constraints.map((c, i) => (
-            <li key={i}>{c}</li>
-          ))}
-        </ul>
-      </section>
-
-      {/* Code editor */}
-      <section className="flex flex-col rounded-xl border border-black/10 dark:border-white/10 overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-2 border-b border-black/10 dark:border-white/10">
-          <span className="text-sm font-medium">Python 3</span>
-          <div className="flex gap-2">
-            <button
-              onClick={runCode}
-              disabled={running || submitting || submissionLocked}
-              className="text-sm px-3 py-1.5 rounded-md bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/20 disabled:opacity-50"
-            >
-              {running ? "Running..." : "Run"}
-            </button>
-            <button
-              onClick={submitInterview}
-              disabled={submitting || running || chatBusy || Boolean(partial.trim()) || !ownerReady}
-              className="text-sm px-3 py-1.5 rounded-md bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
-            >
-              {submitting ? "Submitting..." : submissionLocked ? "Retry Submit" : "Submit"}
-            </button>
-          </div>
-        </div>
-        {(ownerError || submitError) && (
-          <div className="px-4 py-2 text-xs text-red-600 dark:text-red-400 border-b border-black/10 dark:border-white/10">
-            {ownerError && <span>{ownerError} <button onClick={() => void initializeOwner()} className="underline">Retry setup</button></span>}
-            {submitError && <span>{submitError} Retry Submit uses the same saved snapshot.</span>}
-          </div>
-        )}
-        <div className="flex-1 min-h-0">
-          <Editor
-            height="100%"
-            language="python"
-            theme="vs-dark"
-            value={code}
-            onChange={(v) => setCode(v ?? "")}
-            options={{ minimap: { enabled: false }, fontSize: 13, readOnly: submissionLocked }}
-          />
-        </div>
-        {testResult && (
-          <div className="border-t border-black/10 dark:border-white/10 p-3 max-h-40 overflow-y-auto text-xs font-mono">
-            {testResult.crashed ? (
-              <pre className="text-red-500 whitespace-pre-wrap">{testResult.crashOutput}</pre>
-            ) : (
-              <>
-                <div className="mb-2 font-semibold">
-                  {testResult.passed}/{testResult.total} test cases passed
-                </div>
-                {testResult.results.map((r, i) => (
-                  <div key={i} className={r.passed ? "text-green-600 dark:text-green-400" : "text-red-500"}>
-                    {r.passed ? "✓" : "✗"} input={JSON.stringify(r.args)} expected={JSON.stringify(r.expected)}{" "}
-                    got={JSON.stringify(r.actual)}
-                    {r.error ? ` (${r.error})` : ""}
-                  </div>
-                ))}
-              </>
-            )}
-          </div>
-        )}
-      </section>
-
-      {/* Chat with AI interviewer */}
-      <section className="flex flex-col rounded-xl border border-black/10 dark:border-white/10 overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-2 border-b border-black/10 dark:border-white/10">
-          <span className="text-sm font-medium">
-            Alex · AI Interviewer
-            {demoReason && (
-              <span
-                title={
-                  demoReason === "quota"
-                    ? "Gemini free-tier quota is exhausted, so replies are scripted and don't reflect your code."
-                    : "No Gemini key, so replies are scripted and don't reflect your code."
-                }
-                className="ml-2 text-xs font-normal text-amber-600 dark:text-amber-400"
-              >
-                {demoReason === "quota" ? "scripted · quota hit" : "scripted · demo mode"}
-              </span>
-            )}
-          </span>
-          <button
-            onClick={toggleVoice}
-            className="text-xs px-2 py-1 rounded-md bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/20"
-          >
-            Voice: {voiceOn ? "On" : "Off"}
-          </button>
-        </div>
-        <div className="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-3">
-          {messages.map((m, i) => (
-            <div
-              key={i}
-              className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${
-                m.role === "model"
-                  ? "self-start bg-black/5 dark:bg-white/10"
-                  : "self-end bg-blue-600 text-white"
-              }`}
-            >
-              {m.text}
-            </div>
-          ))}
-          {partial && (
-            <div className="self-end max-w-[85%] rounded-2xl px-3 py-2 text-sm bg-blue-600/40 text-white italic">
-              {partial}
-            </div>
-          )}
-          {chatBusy && (
-            <div className="self-start text-xs text-black/40 dark:text-white/40">Alex is typing...</div>
-          )}
-          <div ref={chatEndRef} />
-        </div>
-        <form
-          className="flex gap-2 p-3 border-t border-black/10 dark:border-white/10"
-          onSubmit={(e) => {
-            e.preventDefault();
-            sendMessage();
-          }}
+        <Button
+          variant="danger"
+          size="sm"
+          onClick={submitInterview}
+          disabled={submitting || running || chatBusy || Boolean(partial.trim()) || !ownerReady}
         >
-          <input
-            value={chatInput}
-            onChange={(e) => setChatInput(e.target.value)}
-            disabled={submissionLocked}
-            placeholder={
-              listening
-                ? mutedForSpeaking
-                  ? "Mic off while Alex responds..."
-                  : "Listening — just start talking..."
-                : "Type your response..."
-            }
-            className="flex-1 rounded-full border border-black/10 dark:border-white/10 bg-transparent px-4 py-2 text-sm outline-none focus:border-blue-500"
-          />
-          {micSupported && (
-            <button
-              type="button"
-              onClick={() => setMicOn((prev) => !prev)}
-              disabled={submissionLocked}
-              title={
-                mutedForSpeaking
-                  ? "Muted while Alex responds"
-                  : micOn
-                    ? "Mute the microphone"
-                    : "Unmute the microphone"
-              }
-              className={`rounded-full px-4 py-2 text-sm ${
-                mutedForSpeaking
-                  ? "bg-amber-500 text-white"
-                  : listening
-                    ? "bg-red-600 text-white"
-                    : "bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/20"
-              }`}
-            >
-              {!micOn ? "Mic off" : mutedForSpeaking ? "Muted" : "Mic on"}
-            </button>
+          {submitting ? "Submitting…" : submissionLocked ? "Retry Submit" : "End & Submit"}
+        </Button>
+      </header>
+
+      {(ownerError || submitError) && (
+        <div className="px-4 py-2 text-sm text-danger border-b border-border shrink-0">
+          {ownerError && (
+            <span>
+              {ownerError}{" "}
+              <button type="button" onClick={() => void initializeOwner()} className="underline">
+                Retry setup
+              </button>
+            </span>
           )}
-          <button
-            type="submit"
-            disabled={chatBusy || submissionLocked || !chatInput.trim()}
-            className="rounded-full bg-blue-600 text-white px-4 py-2 text-sm disabled:opacity-50"
+          {submitError && <span>{submitError} Retry Submit uses the same saved snapshot.</span>}
+        </div>
+      )}
+
+      <main className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,1fr)] gap-4 p-4">
+        {/* Problem description */}
+        <section className="flex flex-col rounded-2xl border border-border bg-card overflow-y-auto p-5">
+          <p className="text-xs text-muted mb-3 uppercase tracking-wide">{problem.tags}</p>
+          <p className="text-sm leading-relaxed mb-5 whitespace-pre-wrap">{problem.description}</p>
+
+          <h2 className="text-sm font-semibold mb-2">Examples</h2>
+          <div className="flex flex-col gap-3 mb-5">
+            {problem.examples.map((ex, i) => (
+              <div key={i} className="text-xs bg-subtle rounded-lg p-3 font-mono leading-relaxed">
+                <div>Input: {ex.input}</div>
+                <div>Output: {ex.output}</div>
+                {ex.explanation && <div className="text-muted mt-1">{ex.explanation}</div>}
+              </div>
+            ))}
+          </div>
+
+          <h2 className="text-sm font-semibold mb-2">Constraints</h2>
+          <ul className="text-xs list-disc pl-4 text-muted space-y-1">
+            {problem.constraints.map((c, i) => (
+              <li key={i}>{c}</li>
+            ))}
+          </ul>
+        </section>
+
+        {/* Code editor */}
+        <section className="flex flex-col rounded-2xl border border-border bg-card overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-border">
+            <span className="text-sm font-medium text-muted">Python 3</span>
+            <Button variant="secondary" size="sm" onClick={runCode} disabled={running || submitting || submissionLocked}>
+              {running ? "Running…" : "Run"}
+            </Button>
+          </div>
+          <div className="flex-1 min-h-0">
+            <Editor
+              height="100%"
+              language="python"
+              theme="vs-dark"
+              value={code}
+              onChange={(v) => setCode(v ?? "")}
+              options={{ minimap: { enabled: false }, fontSize: 13, readOnly: submissionLocked }}
+            />
+          </div>
+          {testResult && (
+            <div className="border-t border-border p-3 max-h-40 overflow-y-auto text-xs font-mono bg-subtle">
+              {testResult.crashed ? (
+                <pre className="text-danger whitespace-pre-wrap">{testResult.crashOutput}</pre>
+              ) : (
+                <>
+                  <div
+                    className={`mb-2 font-semibold ${
+                      testResult.passed === testResult.total ? "text-success" : "text-foreground"
+                    }`}
+                  >
+                    {testResult.passed}/{testResult.total} test cases passed
+                  </div>
+                  {testResult.results.map((r, i) => (
+                    <div key={i} className={r.passed ? "text-success" : "text-danger"}>
+                      {r.passed ? "✓" : "✗"} input={JSON.stringify(r.args)} expected={JSON.stringify(r.expected)}{" "}
+                      got={JSON.stringify(r.actual)}
+                      {r.error ? ` (${r.error})` : ""}
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
+        </section>
+
+        {/* Chat with AI interviewer */}
+        <section className="flex flex-col rounded-2xl border border-border bg-card overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-border">
+            <span className="text-sm font-medium flex items-center gap-2">
+              <span className="relative flex h-2 w-2">
+                <span
+                  className={`absolute inline-flex h-full w-full rounded-full ${
+                    interviewerSpeaking ? "bg-accent animate-pulse-dot" : "bg-success"
+                  }`}
+                />
+              </span>
+              Alex · AI Interviewer
+              {demoReason && (
+                <span
+                  title={
+                    demoReason === "quota"
+                      ? "Gemini free-tier quota is exhausted, so replies are scripted and don't reflect your code."
+                      : "No Gemini key, so replies are scripted and don't reflect your code."
+                  }
+                  className="text-xs font-normal text-warning bg-warning-soft rounded-full px-2 py-0.5"
+                >
+                  {demoReason === "quota" ? "scripted · quota hit" : "scripted · demo mode"}
+                </span>
+              )}
+            </span>
+            <button
+              onClick={toggleVoice}
+              className="text-xs px-2.5 py-1 rounded-full bg-subtle hover:bg-border-strong transition-colors"
+            >
+              Voice: {voiceOn ? "On" : "Off"}
+            </button>
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-3">
+            {messages.map((m, i) => (
+              <div
+                key={i}
+                className={`max-w-[85%] rounded-2xl px-3.5 py-2 text-sm leading-relaxed ${
+                  m.role === "model"
+                    ? "self-start bg-subtle"
+                    : "self-end bg-accent text-accent-foreground"
+                }`}
+              >
+                {m.text}
+              </div>
+            ))}
+            {partial && (
+              <div className="self-end max-w-[85%] rounded-2xl px-3.5 py-2 text-sm bg-accent/40 text-accent-foreground italic">
+                {partial}
+              </div>
+            )}
+            {chatBusy && (
+              <div className="self-start text-xs text-muted flex items-center gap-1.5">
+                <span className="flex gap-0.5">
+                  <span className="h-1 w-1 rounded-full bg-muted animate-pulse-dot" />
+                  <span
+                    className="h-1 w-1 rounded-full bg-muted animate-pulse-dot"
+                    style={{ animationDelay: "0.15s" }}
+                  />
+                  <span
+                    className="h-1 w-1 rounded-full bg-muted animate-pulse-dot"
+                    style={{ animationDelay: "0.3s" }}
+                  />
+                </span>
+                Alex is typing
+              </div>
+            )}
+            <div ref={chatEndRef} />
+          </div>
+          <form
+            className="flex gap-2 p-3 border-t border-border"
+            onSubmit={(e) => {
+              e.preventDefault();
+              sendMessage();
+            }}
           >
-            Send
-          </button>
-        </form>
-      </section>
-    </main>
+            <input
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              disabled={submissionLocked}
+              placeholder={
+                listening
+                  ? mutedForSpeaking
+                    ? "Mic off while Alex responds..."
+                    : "Listening — just start talking..."
+                  : "Type your response..."
+              }
+              className="flex-1 rounded-full border border-border-strong bg-transparent px-4 py-2 text-sm outline-none focus:border-accent transition-colors"
+            />
+            {micSupported && (
+              <button
+                type="button"
+                onClick={() => setMicOn((prev) => !prev)}
+                disabled={submissionLocked}
+                title={
+                  mutedForSpeaking
+                    ? "Muted while Alex responds"
+                    : micOn
+                      ? "Mute the microphone"
+                      : "Unmute the microphone"
+                }
+                className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+                  mutedForSpeaking
+                    ? "bg-warning text-white"
+                    : listening
+                      ? "bg-danger text-white"
+                      : "bg-subtle hover:bg-border-strong"
+                }`}
+              >
+                {!micOn ? "Mic off" : mutedForSpeaking ? "Muted" : "Mic on"}
+              </button>
+            )}
+            <Button type="submit" size="sm" disabled={chatBusy || submissionLocked || !chatInput.trim()}>
+              Send
+            </Button>
+          </form>
+        </section>
+      </main>
+    </div>
   );
 }
