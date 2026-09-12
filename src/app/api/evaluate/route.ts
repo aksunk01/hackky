@@ -12,7 +12,14 @@ import {
   SessionConflictError,
 } from "@/lib/interview-sessions";
 import { gradedKeys, validatedEvaluation, type ChatTurn, type Evaluation } from "@/lib/interview-session-types";
-import { computeOverall, correctnessFromTests, rubricText, type DimensionScore, type DimensionScores } from "@/lib/grading";
+import {
+  computeOverall,
+  correctnessFromTests,
+  mentionsComplexity,
+  rubricText,
+  type DimensionScore,
+  type DimensionScores,
+} from "@/lib/grading";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_BODY_CHARS = 160_000;
@@ -30,7 +37,7 @@ function buildFallbackEvaluation(correctness: DimensionScore, history: ChatTurn[
   for (const key of gradedKeys) scores[key] = unavailable;
   const passed = correctness.score ?? 0;
   const mentionedComplexity = history.some(
-    (turn) => turn.role === "user" && /time complexity|space complexity|big[\s-]?o|\bo\(/i.test(turn.text),
+    (turn) => turn.role === "user" && mentionsComplexity(turn.text),
   );
   return {
     overall: computeOverall(scores),

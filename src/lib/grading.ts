@@ -86,6 +86,7 @@ export const dimensions: Dimension[] = [
       5: "Gave a complexity that was partly wrong or only for one of time/space.",
       10: "Correct time and space complexity, and explained the trade-off against alternatives.",
     },
+    notAssessedWhen: "complexity never came up at all — the interviewer never asked and the candidate never raised it, so there was no opportunity to assess.",
   },
   {
     key: "debugging",
@@ -100,6 +101,19 @@ export const dimensions: Dimension[] = [
     notAssessedWhen: "the code was never run, or it passed on the first run so there was nothing to debug.",
   },
 ];
+
+/**
+ * Whether a line of transcript talks about complexity at all. Used by the
+ * interviewer to know whether it still owes the candidate that question, and
+ * by the report to avoid asking for something they already gave. Matches the
+ * spoken forms too ("O of n log n"), since these transcripts come from speech.
+ */
+const COMPLEXITY_MENTION =
+  /time complexity|space complexity|big[\s-]?o\b|\bo\s*\(|\bo\s+of\s+(n|1|log|m)\b|constant time|linear(ithmic)? time|logarithmic|quadratic|exponential/i;
+
+export function mentionsComplexity(text: string): boolean {
+  return COMPLEXITY_MENTION.test(text);
+}
 
 /** Overall-score bands, worded the way real interview loops record a verdict. */
 export const bands = [

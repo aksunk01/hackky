@@ -7,6 +7,7 @@ import {
 } from "@/lib/languages";
 import { getProblem } from "@/lib/problems";
 import { generateText, isQuotaError, type ChatTurn } from "@/lib/gemini";
+import { mentionsComplexity } from "@/lib/grading";
 import type { ExecutionResult } from "@/lib/execute";
 import { looksRandom } from "@/lib/noise";
 
@@ -15,17 +16,20 @@ const MOCK_REPLIES = [
   "Okay, I like that direction. Go ahead and start coding it up — talk me through any tricky parts as you go.",
   "Good progress. What happens with your current approach on an edge case, like an empty input or duplicate values?",
   "Nice, that handles it. Once you think you're done, hit Run to check it against the test cases.",
-  "Makes sense. Is there anything you'd change about the time or space complexity if the input were much larger?",
+  "Walk me through why you picked this data structure over the alternatives.",
 ];
 
 /**
- * The reply for anything that isn't a real answer — mic noise, filler, or an
- * off-topic remark. Steering back to complexity beats reacting to nonsense.
- * Kept as a backstop for whatever slips past the client-side noise filter
- * (e.g. a fluent but off-topic sentence, which looksRandom can't catch).
+ * What to say when the transcript was clearly noise rather than speech. Asking
+ * them to repeat is the honest response — the old behavior answered unheard
+ * audio with a stock complexity question, which read as the interviewer
+ * ignoring them. Rotated so a run of bad audio doesn't repeat one line.
  */
-const DEFLECT_REPLY =
-  "Makes sense. Is there anything you'd change about the time or space complexity if the input were much larger?";
+const NOT_CAUGHT_REPLIES = [
+  "Sorry, I didn't catch that — could you say it again?",
+  "That came through garbled on my end. Mind repeating it?",
+  "I missed that one. Say it once more?",
+];
 
 /** What the candidate did in the editor, when it wasn't them talking. */
 type InterviewEvent = "run" | "code-review" | "periodic-check";
@@ -36,13 +40,27 @@ type ActivitySinceLastCheck = "idle" | "typing";
 /** The model's way of saying a periodic check found nothing worth interrupting for. */
 const NO_COMMENT = "NONE";
 
-/** Visible tag so a periodic direction-check message is obviously not a normal reply. */
-const CHECK_IN_LABEL = "🧭 [2-min check-in] ";
+/**
+ * Whether a periodic check came back as "nothing to say". An exact match is too
+ * strict — models routinely wrap the word in quotes or trail it with a period,
+ * and any near-miss used to be appended to the transcript and read aloud as
+ * the single word "NONE". Stripping the decoration can't turn a real reply into
+ * a false positive, since anything longer still won't equal NONE.
+ */
+function isNoComment(reply: string): boolean {
+  return reply.replace(/[\s"'“”*_.!]/g, "").toUpperCase() === NO_COMMENT;
+}
 
-/** Scripted fallback used when a periodic check can't reach Gemini, so the feature is still visible without a key/quota. */
+/**
+ * Scripted fallback used when a periodic check can't reach Gemini, so the
+ * feature is still visible without a key/quota. Deliberately carries no
+ * "scripted" marker in its text: this reply is spoken by TTS, and the client
+ * already shows a `mocked`/`reason` badge next to it.
+ */
 const CHECK_IN_MOCK_REPLY: Record<ActivitySinceLastCheck, string> = {
-  idle: `${CHECK_IN_LABEL}(scripted — no live Gemini) You've gone quiet for a bit — want to talk me through your current thinking, or where you're stuck?`,
-  typing: `${CHECK_IN_LABEL}(scripted — no live Gemini) Take a second to trace your current approach against the examples above — does it actually hold up on all of them?`,
+  idle: "You've gone quiet for a bit — want to talk me through your current thinking, or where you're stuck?",
+  typing:
+    "Take a second to trace your current approach against the examples above — does it actually hold up on all of them?",
 };
 
 function describeTestResult(result: ExecutionResult): string {
@@ -65,11 +83,69 @@ function describeTestResult(result: ExecutionResult): string {
   ].join("\n");
 }
 
+type TimerInfo = { mode: "countup" | "strict"; minutes?: number; remainingSeconds?: number };
+
+/**
+ * The mechanics of the session, so questions like "what's my limit?" or "can I
+ * switch languages?" get a real answer. Without this Alex has no idea a clock
+ * or a Run button even exists, so it classifies fair questions as off-topic.
+ */
+function describeSetup(timer: TimerInfo | undefined, language: Language): string {
+  let time = "No time limit — the clock counts up and they submit when ready.";
+  if (timer?.mode === "strict") {
+    const limit = timer.minutes ?? 0;
+    const left =
+      typeof timer.remainingSeconds === "number"
+        ? ` About ${Math.max(0, Math.ceil(timer.remainingSeconds / 60))} minute(s) left.`
+        : "";
+    time = `A strict ${limit}-minute limit that auto-submits at zero.${left}`;
+  }
+
+  return `Interview setup — answer questions about any of this directly:
+- Time: ${time}
+- They can press Run at any point to execute their code against the test cases shown in the problem.
+- They can switch language from the picker above the editor; they're currently in ${languageLabel(language)}.
+- Submitting ends the interview and produces a scored report.
+- You cannot see their screen or face, only their editor contents and what they say.`;
+}
+
+/**
+ * Complexity analysis is a scored dimension, but every other mention of it in
+ * this prompt is conditional ("if their code has a complexity problem", "if
+ * every test passed"), so a talkative candidate who never gets a green run
+ * could finish without the question ever being asked — and then be marked down
+ * for it. Whether it has already come up is computed here rather than left to
+ * the model to notice, which is also what stops it from asking twice.
+ */
+function complexityDirective(turns: ChatTurn[], timer: TimerInfo | undefined): string {
+  if (turns.some((turn) => mentionsComplexity(turn.text))) {
+    return `Time and space complexity has already come up in this conversation. Don't
+  ask for it again unless they switch approach and the answer would change.`;
+  }
+
+  const nearlyOver =
+    timer?.mode === "strict" &&
+    typeof timer.remainingSeconds === "number" &&
+    timer.remainingSeconds <= 5 * 60;
+
+  if (nearlyOver) {
+    return `Complexity has NOT come up yet and there are only a few minutes left. Ask
+  them for the time and space complexity of their approach in this reply, before
+  the clock runs out — it is scored, and an unasked question costs them.`;
+  }
+
+  return `Complexity has NOT come up yet. Once they've settled on an approach — you
+  don't need working code first — ask them for its time and space complexity.
+  Do not let the interview end without having asked at least once.`;
+}
+
 function buildSystemInstruction(
   problem: NonNullable<ReturnType<typeof getProblem>>,
   code: string,
   testResult: ExecutionResult | null,
-  language: Language
+  language: Language,
+  timer: TimerInfo | undefined,
+  turns: ChatTurn[]
 ) {
   return `You are Alex, a friendly but rigorous AI technical interviewer conducting a live coding interview.
 
@@ -82,6 +158,8 @@ exactly this, right now:
 ${code.trim() || "(the editor is still empty)"}
 \`\`\`
 ${testResult ? `\nMost recent run of that code:\n${describeTestResult(testResult)}\n` : ""}
+${describeSetup(timer, language)}
+
 Guidelines:
 - Keep replies short and conversational (2-4 sentences), like a real spoken interview.
 - This reply is spoken aloud by text-to-speech, not rendered as text. Never use
@@ -97,9 +175,24 @@ Guidelines:
 - Point out real bugs, missing edge cases and complexity problems in their code, but
   nudge — ask a question that leads them to it rather than handing over the fix.
 - Ask the candidate to explain their approach before or while they code.
+- ${complexityDirective(turns, timer)}
 - Do not repeat the full problem statement back to them.
-- If the candidate's latest message is unintelligible, filler, or unrelated to the
-  interview, reply with exactly this and nothing else: "${DEFLECT_REPLY}"`;
+
+When their message isn't a direct answer about the problem, respond to what it
+actually was — never fall back on a stock sentence, and never ask about
+complexity as a way of dodging something you didn't follow:
+- Asking about the interview itself (time left, running code, switching language,
+  what submitting does): answer it from the setup above in one line, then hand the
+  floor back to them.
+- Something you genuinely couldn't parse: say you didn't catch it and ask them to
+  repeat. Do not guess at what they meant, and do not change the subject.
+- A misunderstanding of the problem or of something you said: correct it plainly
+  and briefly, then point them back to where they were.
+- Actually off-topic: acknowledge it in a few words and steer back to the specific
+  thing they were last working on — the function they're mid-way through, the
+  failing case, the approach they just described. Phrase it differently each time.
+- Small talk or a brief aside: a short human reply is fine before returning to the
+  problem. You don't have to interrogate every message.`;
 }
 
 /** The turn that stands in for the candidate when the editor is what changed. */
@@ -146,7 +239,7 @@ ask about an edge case or the complexity. Don't repeat feedback you've already g
 
 export async function POST(request: Request) {
   const body = await request.json();
-  const { problemId, history, code, testResult, event, activity, language } = body as {
+  const { problemId, history, code, testResult, event, activity, language, timer } = body as {
     problemId?: string;
     history?: ChatTurn[];
     code?: string;
@@ -154,6 +247,7 @@ export async function POST(request: Request) {
     event?: InterviewEvent;
     activity?: ActivitySinceLastCheck;
     language?: string;
+    timer?: TimerInfo;
   };
 
   if (!problemId) {
@@ -166,11 +260,17 @@ export async function POST(request: Request) {
   }
 
   const turns = history ?? [];
+  const userTurnCount = turns.filter((turn) => turn.role === "user").length;
   const lastUserTurn = turns.filter((turn) => turn.role === "user").at(-1);
 
-  // Noise shouldn't drive the interview — or cost a model call.
+  // Noise shouldn't drive the interview — or cost a model call. Asking them to
+  // repeat is the honest answer to audio we couldn't make out.
   if (!event && lastUserTurn && looksRandom(lastUserTurn.text)) {
-    return NextResponse.json({ reply: DEFLECT_REPLY, mocked: false, deflected: true });
+    return NextResponse.json({
+      reply: NOT_CAUGHT_REPLIES[userTurnCount % NOT_CAUGHT_REPLIES.length],
+      mocked: false,
+      deflected: true,
+    });
   }
 
   const contents: ChatTurn[] = event
@@ -191,20 +291,25 @@ export async function POST(request: Request) {
         problem,
         code ?? "",
         testResult ?? null,
-        isLanguage(language) ? language : DEFAULT_LANGUAGE
+        isLanguage(language) ? language : DEFAULT_LANGUAGE,
+        timer,
+        turns
       ),
       contents
     );
     if (reply) {
       // A periodic check that found nothing wrong stays silent rather than
       // interrupting with idle praise every two minutes.
-      if (event === "periodic-check" && reply.trim().toUpperCase() === NO_COMMENT) {
+      if (event === "periodic-check" && isNoComment(reply)) {
         return NextResponse.json({ reply: null, mocked: false });
       }
-      // Tagged so it's unmistakable in the transcript which messages came from
-      // the periodic checker versus the regular back-and-forth.
-      const taggedReply = event === "periodic-check" ? `${CHECK_IN_LABEL}${reply}` : reply;
-      return NextResponse.json({ reply: taggedReply, mocked: false });
+      // Flagged rather than prefixed with a label: the client adds the visible
+      // tag for display, so the tag never reaches text-to-speech.
+      return NextResponse.json({
+        reply,
+        mocked: false,
+        ...(event === "periodic-check" ? { checkIn: true } : {}),
+      });
     }
   } catch (err) {
     console.error("Gemini interview call failed, falling back to mock:", err);
@@ -213,13 +318,15 @@ export async function POST(request: Request) {
     quotaHit = isQuotaError(err);
   }
 
-  // The periodic checker gets a scripted, clearly-labeled stand-in so it's
-  // visible in testing even without a working Gemini call — everything else
-  // stays quiet, since there's no canned line that could reflect their code.
+  // The periodic checker gets a scripted stand-in so it's visible in testing
+  // even without a working Gemini call — flagged `mocked` so the UI marks it
+  // as such. Everything else stays quiet, since there's no canned line that
+  // could reflect their code.
   if (event === "periodic-check") {
     return NextResponse.json({
       reply: CHECK_IN_MOCK_REPLY[activity ?? "idle"],
       mocked: true,
+      checkIn: true,
       reason: quotaHit ? "quota" : "unavailable",
     });
   }
@@ -232,16 +339,16 @@ export async function POST(request: Request) {
     });
   }
 
-  if (quotaHit) {
-    return NextResponse.json({ reply: DEFLECT_REPLY, mocked: true, reason: "quota" });
-  }
-
-  const turnCount = turns.filter((t) => t.role === "user").length;
-  const mockIndex = Math.min(turnCount, MOCK_REPLIES.length - 1);
+  // Cycles rather than clamping to the last entry: clamping meant a long
+  // interview without Gemini repeated one sentence on every single turn.
   const reply =
-    turnCount === 0
+    userTurnCount === 0
       ? `Hi, I'm Alex, your interviewer today. Let's look at "${problem.title}". Take a look at the problem and tell me how you'd approach it.`
-      : MOCK_REPLIES[mockIndex];
+      : MOCK_REPLIES[(userTurnCount - 1) % MOCK_REPLIES.length];
 
-  return NextResponse.json({ reply, mocked: true });
+  return NextResponse.json({
+    reply,
+    mocked: true,
+    ...(quotaHit ? { reason: "quota" } : {}),
+  });
 }

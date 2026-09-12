@@ -31,6 +31,8 @@ type ActivitySinceLastCheck = "idle" | "typing";
 type InterviewReply = {
   reply: string | null;
   mocked?: boolean;
+  /** Set when the reply came from the periodic direction check rather than the conversation. */
+  checkIn?: boolean;
   reason?: string;
 };
 
@@ -49,6 +51,20 @@ const IDLE_REVIEW_MS = 12_000;
 const MIN_CODE_DELTA = 15;
 /** How often Alex checks in on direction, independent of the quick idle review above. */
 const PERIODIC_CHECK_MS = 2 * 60_000;
+/**
+ * How often that window is re-tested. Shorter than the window itself on
+ * purpose: a check-in that can't fire (mid-sentence, mid-reply) is retried
+ * shortly after the blocker clears, instead of being pushed out a full two
+ * minutes by a fixed-period interval.
+ */
+const CHECK_POLL_MS = 10_000;
+
+/**
+ * Visible tag marking a message as an unprompted direction check rather than a
+ * reply. Display only — it is never passed to text-to-speech, which would read
+ * the brackets and label out loud before the actual sentence.
+ */
+const CHECK_IN_LABEL = "🧭 [2-min check-in] ";
 
 function noSubscription() {
   return () => {};
@@ -254,6 +270,11 @@ export default function InterviewPage({
   const messagesRef = useRef(messages);
   const codeAtLastCheck = useRef(problem?.starterCode[language] ?? "");
   const talkedSinceLastCheck = useRef(false);
+  // Wall-clock start of the current silence window. Reset whenever Alex says
+  // anything at all, so the check-in measures "two minutes since the last
+  // thing either of us said" rather than ticking off a clock that started at
+  // mount and can land seconds after his previous message.
+  const lastCheckAt = useRef(Date.now());
   // A transcript in progress hasn't reached sendMessage/talkedSinceLastCheck
   // yet, so the interval needs its own live read of "is someone talking
   // right now" — otherwise a tick landing mid-sentence looks identical to
@@ -311,11 +332,13 @@ export default function InterviewPage({
   useEffect(() => {
     if (!problem) return;
     const interval = setInterval(() => {
+      if (Date.now() - lastCheckAt.current < PERIODIC_CHECK_MS) return;
       // Mid-utterance, mid-reply, already submitted, or past the deadline:
       // retained for the next tick rather than lost — never talk over
       // someone, and never fire once the session is wrapping up.
       if (partialRef.current || interviewerSpeakingRef.current) return;
       if (busy.current || submissionRef.current || deadlineReachedRef.current) return;
+      lastCheckAt.current = Date.now();
       const talked = talkedSinceLastCheck.current;
       const typed = hasMeaningfulChange(codeRef.current, codeAtLastCheck.current);
       codeAtLastCheck.current = codeRef.current;
@@ -332,7 +355,7 @@ export default function InterviewPage({
         event: "periodic-check",
         activity,
       });
-    }, PERIODIC_CHECK_MS);
+    }, CHECK_POLL_MS);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [problem?.id]);
@@ -465,13 +488,25 @@ export default function InterviewPage({
           testResult: options.result ?? testResult,
           event: options.event,
           activity: options.activity,
+          // Lets Alex answer "how much time do I have?" instead of treating it
+          // as an off-topic remark.
+          timer: {
+            mode: timerConfig.mode,
+            minutes: timerConfig.minutes,
+            ...(remainingSeconds !== null ? { remainingSeconds } : {}),
+          },
         }),
       });
       const data = (await res.json()) as InterviewReply;
       setDemoReason(data.mocked ? (data.reason ?? "no-key") : null);
       // He stays quiet when an editor event can't be answered for real.
       if (!data.reply) return;
-      setMessages((prev) => [...prev, { role: "model", text: data.reply! }]);
+      // Anything he says restarts the silence window, so a direction check
+      // can't land right on the heels of a reply he just gave.
+      lastCheckAt.current = Date.now();
+      // Tagged for the transcript, untagged for the voice.
+      const shown = data.checkIn ? `${CHECK_IN_LABEL}${data.reply}` : data.reply;
+      setMessages((prev) => [...prev, { role: "model", text: shown }]);
       // speak() closes the mic itself (synchronously, before its own network
       // request) the moment it's called, so clearing busy right after — even
       // though speak() is still running in the background — leaves no gap.
@@ -511,7 +546,11 @@ export default function InterviewPage({
     if (runningRef.current || submittingRef.current || submissionRef.current || deadlineReachedRef.current) return;
     // Alex hasn't seen the other buffer, but swapping languages isn't itself
     // progress worth interrupting him for — and the old run no longer applies.
+    // Both baselines move: leaving codeAtLastCheck on the old language made the
+    // swapped-in draft look like a burst of typing, so the next check-in
+    // critiqued an implementation the candidate hadn't touched.
     reviewedCode.current = drafts[next] ?? "";
+    codeAtLastCheck.current = drafts[next] ?? "";
     setTestResult(null);
     setLanguage(next);
   }
