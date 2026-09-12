@@ -5,10 +5,12 @@ import {
   COMPILE_TIMEOUT_MS,
   EXEC_OPTIONS,
   type ExecutionResult,
+  type TypedProblem,
   crashedResult,
   errorText,
   execFileAsync,
   parseRawResults,
+  requireTypes,
   toExecutionResult,
   withTempDir,
 } from "./common";
@@ -87,7 +89,7 @@ function cppLiteral(type: ValueType, value: unknown): string {
   }
 }
 
-function buildHarness(problem: Problem, candidateCode: string): string {
+function buildHarness(problem: TypedProblem, candidateCode: string): string {
   const blocks = problem.testCases.map((testCase, i) => {
     const decls = testCase.args
       .map(
@@ -126,10 +128,13 @@ export async function runCpp(
   problem: Problem,
   candidateCode: string
 ): Promise<ExecutionResult> {
+  const typed = requireTypes(problem);
+  if (!typed) return crashedResult(problem, "This problem doesn't support C++ yet.");
+
   return withTempDir(async (dir) => {
     const source = path.join(dir, "solution.cpp");
     const binary = path.join(dir, "solution");
-    await writeFile(source, buildHarness(problem, candidateCode), "utf8");
+    await writeFile(source, buildHarness(typed, candidateCode), "utf8");
 
     try {
       await execFileAsync("g++", ["-std=c++17", "-O1", "-o", binary, source], {

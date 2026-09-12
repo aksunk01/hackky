@@ -3,7 +3,14 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import type { Problem } from "../problems";
+import type { Problem, ValueType } from "../problems";
+
+/** A problem with the type metadata the statically typed runners need. */
+export type TypedProblem = Problem & { paramTypes: ValueType[]; returnType: ValueType };
+
+export function requireTypes(problem: Problem): TypedProblem | null {
+  return problem.paramTypes && problem.returnType ? (problem as TypedProblem) : null;
+}
 
 export const execFileAsync = promisify(execFile);
 

@@ -5,10 +5,12 @@ import {
   COMPILE_TIMEOUT_MS,
   EXEC_OPTIONS,
   type ExecutionResult,
+  type TypedProblem,
   crashedResult,
   errorText,
   execFileAsync,
   parseRawResults,
+  requireTypes,
   toExecutionResult,
   withTempDir,
 } from "./common";
@@ -86,7 +88,7 @@ function emitCall(type: ValueType): string {
   }
 }
 
-function buildHarness(problem: Problem): string {
+function buildHarness(problem: TypedProblem): string {
   const blocks = problem.testCases.map((testCase, i) => {
     const decls = testCase.args
       .map(
@@ -124,10 +126,13 @@ export async function runJava(
   problem: Problem,
   candidateCode: string
 ): Promise<ExecutionResult> {
+  const typed = requireTypes(problem);
+  if (!typed) return crashedResult(problem, "This problem doesn't support Java yet.");
+
   return withTempDir(async (dir) => {
     const classes = path.join(dir, "classes");
     await writeFile(path.join(dir, "Solution.java"), candidateCode, "utf8");
-    await writeFile(path.join(dir, "Main.java"), buildHarness(problem), "utf8");
+    await writeFile(path.join(dir, "Main.java"), buildHarness(typed), "utf8");
 
     try {
       await execFileAsync(

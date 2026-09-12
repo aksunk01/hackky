@@ -5,10 +5,12 @@ import {
   COMPILE_TIMEOUT_MS,
   EXEC_OPTIONS,
   type ExecutionResult,
+  type TypedProblem,
   crashedResult,
   errorText,
   execFileAsync,
   parseRawResults,
+  requireTypes,
   toExecutionResult,
   withTempDir,
 } from "./common";
@@ -90,7 +92,7 @@ function declareArg(type: ValueType, name: string, value: unknown): { decl: stri
 }
 
 /** The call plus the emit for it, including any out-params the return type needs. */
-function callAndEmit(problem: Problem, callArgs: string[]): string {
+function callAndEmit(problem: TypedProblem, callArgs: string[]): string {
   const call = (extra: string[] = []) =>
     `${problem.funcName}(${[...callArgs, ...extra].join(", ")})`;
 
@@ -116,7 +118,7 @@ function callAndEmit(problem: Problem, callArgs: string[]): string {
   }
 }
 
-function buildHarness(problem: Problem, candidateCode: string): string {
+function buildHarness(problem: TypedProblem, candidateCode: string): string {
   const blocks = problem.testCases.map((testCase, i) => {
     const declared = testCase.args.map((arg, j) =>
       declareArg(problem.paramTypes[j]!, `_a${j}`, arg)
@@ -146,10 +148,13 @@ export async function runC(
   problem: Problem,
   candidateCode: string
 ): Promise<ExecutionResult> {
+  const typed = requireTypes(problem);
+  if (!typed) return crashedResult(problem, "This problem doesn't support C yet.");
+
   return withTempDir(async (dir) => {
     const source = path.join(dir, "solution.c");
     const binary = path.join(dir, "solution");
-    await writeFile(source, buildHarness(problem, candidateCode), "utf8");
+    await writeFile(source, buildHarness(typed, candidateCode), "utf8");
 
     try {
       await execFileAsync("gcc", ["-std=c11", "-O1", "-o", binary, source], {
