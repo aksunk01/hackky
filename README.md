@@ -15,7 +15,7 @@ Add a [Gemini API key](https://aistudio.google.com/apikey) to `.env.local`:
 GEMINI_API_KEY=your-key-here
 ```
 
-Without a key, the app still runs in **demo mode** — the interviewer and evaluator fall back to scripted responses so the flow works end-to-end offline. The chat header says `scripted` whenever that's happening, so a canned reply is never mistaken for the model ignoring your code.
+Without a Gemini key, the interviewer and evaluator use **demo-mode** responses. MySQL is still required to save completed reports. The chat header says `scripted` whenever that's happening, so a canned reply is never mistaken for the model ignoring your code.
 
 The model defaults to `gemini-3.5-flash`; set `GEMINI_MODEL` to override. Don't use `gemini-3.6-flash` on a free key — its quota is 20 requests and it 429s almost immediately, which lands you in demo mode.
 
@@ -35,6 +35,19 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000), click **Start Interview**, pick a problem, and go.
 
+## Saved interview reports (MySQL)
+
+Completed reports are stored in MySQL 8.0.16+ so the same browser can return to **History** later. Set `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, and `MYSQL_DATABASE` in `.env.local`; `MYSQL_SSL=0` is suitable for a local database. For hosted MySQL, set `MYSQL_SSL=1` and, if your provider requires a custom CA, set `MYSQL_SSL_CA` to its PEM certificate. Do not disable certificate verification.
+
+Create the database and a restricted app user, then apply the checked-in schema:
+
+```bash
+mysql -u root -p -e "CREATE DATABASE interviewai CHARACTER SET utf8mb4; CREATE USER 'interviewai'@'127.0.0.1' IDENTIFIED BY 'choose-a-password'; GRANT SELECT, INSERT ON interviewai.* TO 'interviewai'@'127.0.0.1';"
+mysql -u root -p interviewai < sql/001_interview_sessions.sql
+```
+
+Set `MYSQL_USER=interviewai`, `MYSQL_DATABASE=interviewai`, and the chosen password in `.env.local`. The report pages read directly from MySQL; if the connection is unavailable, the app shows a retryable error instead of claiming a report was saved. The anonymous owner cookie is tied to this browser; clearing it loses access to older reports.
+
 ## How it works
 
 - **Frontend**: Next.js App Router pages for landing, problem selection, the interview workspace (Monaco editor + chat), and results.
@@ -42,6 +55,7 @@ Open [http://localhost:3000](http://localhost:3000), click **Start Interview**, 
 - **Code execution**: `/api/execute` runs submitted Python against the problem's test cases via a subprocess with a harness (not a fully isolated sandbox — fine for local demo use, not for untrusted multi-tenant deployment).
 - **Voice**: `/api/stream-speech` streams ElevenLabs TTS audio back to the browser (`GET`, so `<audio>` can point straight at it and start playing as bytes arrive — `POST` is a buffered fallback for the rare reply too long to fit a URL); `/api/transcribe-audio` posts recorded mic audio to ElevenLabs Scribe. All are ordinary Next route handlers served from the same origin as the app, so `npm run dev` is the only process you need. The mic is held closed for the interviewer's entire turn — from the moment a reply is requested through the end of TTS playback, not just while audio is actually coming out of the speakers — so it can't transcribe its own voice, or be talked over during model/synthesis latency, back into the conversation. Both listening engines show a live transcript as you talk — the browser engine revises its guess continuously, while Scribe periodically re-transcribes the in-progress recording — and the finished utterance replaces it once you stop.
 - **Evaluation**: `/api/evaluate` re-runs the tests and asks Gemini to score the transcript + code across problem solving, communication, correctness, code quality, complexity analysis, and debugging.
+- **History**: Submit saves the final code, transcript, test count, and grading to MySQL, then opens `/sessions/[id]`. `/sessions` lists this browser's completed reports.
 
 ## Security note
 

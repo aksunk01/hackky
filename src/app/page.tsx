@@ -6,7 +6,8 @@ export default function LandingPage() {
       <header className="flex items-center justify-between px-8 py-5 border-b border-black/10 dark:border-white/10">
         <span className="font-semibold text-lg">InterviewAI</span>
         <nav className="flex gap-6 text-sm text-black/60 dark:text-white/60">
-          <span>Practice</span>
+          <Link href="/problems" className="hover:text-blue-600">Practice</Link>
+          <Link href="/sessions" className="hover:text-blue-600">History</Link>
           <span>About</span>
         </nav>
       </header>

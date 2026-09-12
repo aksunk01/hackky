@@ -26,6 +26,14 @@ type InterviewReply = {
   reason?: string;
 };
 
+type SubmissionSnapshot = {
+  id: string;
+  problemId: string;
+  history: ChatTurn[];
+  code: string;
+  startedAt: string;
+};
+
 /** Quiet typing after which Alex looks at the editor unprompted. */
 const IDLE_REVIEW_MS = 12_000;
 /** Non-whitespace characters of change worth a comment. */
@@ -66,6 +74,10 @@ export default function InterviewPage({
   const [testResult, setTestResult] = useState<ExecutionResult | null>(null);
   const [running, setRunning] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [ownerReady, setOwnerReady] = useState(false);
+  const [ownerError, setOwnerError] = useState("");
+  const [submitError, setSubmitError] = useState("");
+  const [submissionLocked, setSubmissionLocked] = useState(false);
   const micSupported = useSyncExternalStore(
     noSubscription,
     isMicrophoneRecordingSupported,
@@ -91,11 +103,31 @@ export default function InterviewPage({
   const reviewedCode = useRef(problem?.starterCode ?? "");
   // State, but read from timers and callbacks that mustn't wait for a render.
   const busy = useRef(false);
+  const runningRef = useRef(false);
+  const submittingRef = useRef(false);
+  const startedAtRef = useRef<string | null>(null);
+  const submissionRef = useRef<SubmissionSnapshot | null>(null);
   // The listener is started once and outlives many renders, so its callback has
   // to reach the current sendMessage rather than the one captured at start.
   const sendMessageRef = useRef<(text: string) => void>(() => {});
 
   useEffect(() => stopSpeaking, []);
+
+  useEffect(() => {
+    startedAtRef.current ??= new Date().toISOString();
+    void initializeOwner();
+  }, []);
+
+  async function initializeOwner() {
+    setOwnerError("");
+    try {
+      const res = await fetch("/api/owner", { method: "POST" });
+      if (!res.ok) throw new Error("Owner setup failed.");
+      setOwnerReady(true);
+    } catch {
+      setOwnerError("Could not initialize interview history. Retry before submitting.");
+    }
+  }
 
   useEffect(() => {
     if (!problem || !micSupported || !micOn) return;
@@ -136,7 +168,7 @@ export default function InterviewPage({
   // Alex reads the editor on his own once the typing stops, so the candidate
   // gets feedback on what they wrote without having to narrate it.
   useEffect(() => {
-    if (!problem || messages.length === 0 || chatBusy) return;
+    if (!problem || messages.length === 0 || chatBusy || submissionLocked) return;
     if (!hasMeaningfulChange(code, reviewedCode.current)) return;
 
     const timer = setTimeout(() => {
@@ -144,7 +176,7 @@ export default function InterviewPage({
     }, IDLE_REVIEW_MS);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [code, chatBusy, messages.length, problem?.id]);
+  }, [code, chatBusy, messages.length, problem?.id, submissionLocked]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -168,7 +200,7 @@ export default function InterviewPage({
     event?: InterviewEvent;
     result?: ExecutionResult | null;
   }) {
-    if (busy.current) return;
+    if (busy.current || submissionRef.current) return;
     busy.current = true;
     setChatBusy(true);
     // Closed for the whole round trip, not just once his reply starts
@@ -209,7 +241,7 @@ export default function InterviewPage({
 
   async function sendMessage(overrideText?: string) {
     const text = (overrideText ?? chatInput).trim();
-    if (!text || busy.current) return;
+    if (!text || busy.current || submissionRef.current) return;
     const nextHistory: ChatTurn[] = [...messages, { role: "user", text }];
     setMessages(nextHistory);
     setChatInput("");
@@ -224,6 +256,8 @@ export default function InterviewPage({
   }
 
   async function runCode() {
+    if (runningRef.current || submittingRef.current || submissionRef.current) return;
+    runningRef.current = true;
     setRunning(true);
     setTestResult(null);
     try {
@@ -237,12 +271,26 @@ export default function InterviewPage({
       // A real interviewer watches the run and says something about it.
       await askInterviewer({ history: messages, event: "run", result: data });
     } finally {
+      runningRef.current = false;
       setRunning(false);
     }
   }
 
   async function submitInterview() {
-    // Closing the mic runs the listener effect's cleanup.
+    if (submittingRef.current || busy.current || runningRef.current || partial.trim() || !ownerReady) return;
+    submittingRef.current = true;
+    const snapshot = submissionRef.current ?? {
+      id: crypto.randomUUID(),
+      problemId: problem!.id,
+      history: messages.map(({ role, text }) => ({ role, text })),
+      code,
+      startedAt: startedAtRef.current ?? new Date().toISOString(),
+    };
+    submissionRef.current = snapshot;
+    setSubmissionLocked(true);
+    setSubmitError("");
+    // Closing the mic runs the listener effect's cleanup. The saved transcript
+    // contains only completed turns, never a partial speech preview.
     setMicOn(false);
     stopSpeaking();
     setSubmitting(true);
@@ -250,15 +298,15 @@ export default function InterviewPage({
       const res = await fetch("/api/evaluate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ problemId: problem!.id, history: messages, code }),
+        body: JSON.stringify(snapshot),
       });
-      const data = await res.json();
-      sessionStorage.setItem(
-        "interview-result",
-        JSON.stringify({ problem: problem!.title, ...data })
-      );
-      router.push("/results");
+      const data = (await res.json()) as { id?: string; error?: string };
+      if (!res.ok || !data.id) throw new Error(data.error || "Could not save the report.");
+      router.push(`/sessions/${data.id}`);
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : "Could not save the report. Retry this submission.");
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }
@@ -303,20 +351,26 @@ export default function InterviewPage({
           <div className="flex gap-2">
             <button
               onClick={runCode}
-              disabled={running}
+              disabled={running || submitting || submissionLocked}
               className="text-sm px-3 py-1.5 rounded-md bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/20 disabled:opacity-50"
             >
               {running ? "Running..." : "Run"}
             </button>
             <button
               onClick={submitInterview}
-              disabled={submitting}
+              disabled={submitting || running || chatBusy || Boolean(partial.trim()) || !ownerReady}
               className="text-sm px-3 py-1.5 rounded-md bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
             >
-              {submitting ? "Submitting..." : "Submit"}
+              {submitting ? "Submitting..." : submissionLocked ? "Retry Submit" : "Submit"}
             </button>
           </div>
         </div>
+        {(ownerError || submitError) && (
+          <div className="px-4 py-2 text-xs text-red-600 dark:text-red-400 border-b border-black/10 dark:border-white/10">
+            {ownerError && <span>{ownerError} <button onClick={() => void initializeOwner()} className="underline">Retry setup</button></span>}
+            {submitError && <span>{submitError} Retry Submit uses the same saved snapshot.</span>}
+          </div>
+        )}
         <div className="flex-1 min-h-0">
           <Editor
             height="100%"
@@ -324,7 +378,7 @@ export default function InterviewPage({
             theme="vs-dark"
             value={code}
             onChange={(v) => setCode(v ?? "")}
-            options={{ minimap: { enabled: false }, fontSize: 13 }}
+            options={{ minimap: { enabled: false }, fontSize: 13, readOnly: submissionLocked }}
           />
         </div>
         {testResult && (
@@ -407,6 +461,7 @@ export default function InterviewPage({
           <input
             value={chatInput}
             onChange={(e) => setChatInput(e.target.value)}
+            disabled={submissionLocked}
             placeholder={
               listening
                 ? mutedForSpeaking
@@ -420,6 +475,7 @@ export default function InterviewPage({
             <button
               type="button"
               onClick={() => setMicOn((prev) => !prev)}
+              disabled={submissionLocked}
               title={
                 mutedForSpeaking
                   ? "Muted while Alex responds"
@@ -440,7 +496,7 @@ export default function InterviewPage({
           )}
           <button
             type="submit"
-            disabled={chatBusy || !chatInput.trim()}
+            disabled={chatBusy || submissionLocked || !chatInput.trim()}
             className="rounded-full bg-blue-600 text-white px-4 py-2 text-sm disabled:opacity-50"
           >
             Send
