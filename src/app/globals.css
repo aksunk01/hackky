@@ -1,0 +1,125 @@
+@import "tailwindcss";
+
+@theme {
+  /* A dark, focused interview room. The editor is the brightest thing on screen. */
+  --color-ink: #05080f;
+  --color-surface: #0a0f1a;
+  --color-panel: #111927;
+  --color-raised: #182236;
+  --color-line: #1f2c42;
+  --color-line-soft: #16202f;
+
+  --color-body: #dbe4f0;
+  --color-muted: #8a9ab3;
+  --color-faint: #5c6b82;
+
+  --color-accent: #4ade80;
+  --color-accent-dim: #16351f;
+  --color-info: #60a5fa;
+  --color-warn: #fbbf24;
+  --color-bad: #f87171;
+  --color-hint: #c084fc;
+
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, "JetBrains Mono", Menlo,
+    Consolas, monospace;
+  --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Inter, Roboto, sans-serif;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--color-ink);
+  color: var(--color-body);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbars that do not fight the dark theme. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-line);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--color-raised);
+  background-clip: content-box;
+}
+
+@utility panel {
+  background: var(--color-panel);
+  border: 1px solid var(--color-line);
+  border-radius: 0.75rem;
+}
+
+/* The pulsing ring on the mic button while it is listening. */
+@keyframes listening-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgb(74 222 128 / 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 14px rgb(74 222 128 / 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(74 222 128 / 0);
+  }
+}
+.listening-ring {
+  animation: listening-pulse 1.8s infinite;
+}
+
+/* The interviewer's speaking indicator. */
+@keyframes speak-bar {
+  0%, 100% { transform: scaleY(0.35); }
+  50% { transform: scaleY(1); }
+}
+.speak-bar > span {
+  display: block;
+  width: 3px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--color-info);
+  transform-origin: center;
+  animation: speak-bar 0.9s ease-in-out infinite;
+}
+.speak-bar > span:nth-child(2) { animation-delay: 0.15s; }
+.speak-bar > span:nth-child(3) { animation-delay: 0.3s; }
+.speak-bar > span:nth-child(4) { animation-delay: 0.45s; }
+
+@keyframes fade-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.fade-rise {
+  animation: fade-rise 0.28s ease-out both;
+}
+
+/* Inline `code` rendered inside problem prose. */
+.prose-code code {
+  background: var(--color-raised);
+  border: 1px solid var(--color-line);
+  border-radius: 0.3rem;
+  padding: 0.05rem 0.3rem;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  color: #a5d6ff;
+}
