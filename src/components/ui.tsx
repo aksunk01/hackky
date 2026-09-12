@@ -102,7 +102,14 @@ export function SiteHeader({ active }: { active?: "practice" | "about" }) {
         <Link href="/sessions" className="text-muted hover:text-foreground transition-colors">
           History
         </Link>
-        <span className="text-muted/60 cursor-default">About</span>
+        <Link
+          href="/about"
+          className={`transition-colors ${
+            active === "about" ? "text-foreground font-medium" : "text-muted hover:text-foreground"
+          }`}
+        >
+          About
+        </Link>
       </nav>
     </header>
   );

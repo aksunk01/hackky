@@ -47,12 +47,8 @@ type SubmissionSnapshot = {
 const IDLE_REVIEW_MS = 12_000;
 /** Non-whitespace characters of change worth a comment. */
 const MIN_CODE_DELTA = 15;
-/**
- * How often Alex checks in on direction, independent of the quick idle review
- * above. Cut to 20s outside production so the behavior can be exercised
- * without sitting through the real 2-minute cadence.
- */
-const PERIODIC_CHECK_MS = process.env.NODE_ENV === "production" ? 2 * 60_000 : 20_000;
+/** How often Alex checks in on direction, independent of the quick idle review above. */
+const PERIODIC_CHECK_MS = 2 * 60_000;
 
 function noSubscription() {
   return () => {};
@@ -703,14 +699,6 @@ export default function InterviewPage({
                 />
               </span>
               Alex · AI Interviewer
-              {process.env.NODE_ENV !== "production" && (
-                <span
-                  title="Dev-only: the periodic direction check normally fires every 2 minutes."
-                  className="text-xs font-normal text-muted border border-dashed border-border-strong rounded-full px-2 py-0.5"
-                >
-                  check-in every {PERIODIC_CHECK_MS / 1000}s (dev)
-                </span>
-              )}
               {demoReason && (
                 <span
                   title={

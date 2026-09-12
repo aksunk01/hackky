@@ -20,6 +20,7 @@ const PRELUDE = `#include <stdio.h>
 #include <stdbool.h>
 #include <string.h>
 #include <limits.h>
+#include <ctype.h>
 `;
 
 const EMITTERS = `// Results are written to a scratch file so the candidate's own prints can't interleave with them.
