@@ -239,6 +239,9 @@ export default function InterviewPage({
   const busy = useRef(false);
   const runningRef = useRef(false);
   const submittingRef = useRef(false);
+  // The grader only sees the final run; the count tells it whether there was
+  // ever anything to debug, so "never ran it" isn't scored as bad debugging.
+  const runCountRef = useRef(0);
   const startedAtRef = useRef<string | null>(null);
   const submissionRef = useRef<SubmissionSnapshot | null>(null);
   // The listener is started once and outlives many renders, so its callback has
@@ -524,6 +527,7 @@ export default function InterviewPage({
         body: JSON.stringify({ problemId: problem!.id, code, language }),
       });
       const data = (await res.json()) as ExecutionResult;
+      runCountRef.current += 1;
       setTestResult(data);
       // A real interviewer watches the run and says something about it.
       await askInterviewer({ history: messages, event: "run", result: data });
@@ -543,6 +547,7 @@ export default function InterviewPage({
       history: messages.map(({ role, text }) => ({ role, text })),
       code,
       language,
+      runs: runCountRef.current,
       startedAt: startedAtRef.current ?? new Date().toISOString(),
     };
     submissionRef.current = snapshot;

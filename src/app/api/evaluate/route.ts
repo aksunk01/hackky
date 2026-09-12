@@ -11,42 +11,38 @@ import {
   saveCompletedSession,
   SessionConflictError,
 } from "@/lib/interview-sessions";
-import { validatedEvaluation, type ChatTurn, type Evaluation } from "@/lib/interview-session-types";
+import { gradedKeys, validatedEvaluation, type ChatTurn, type Evaluation } from "@/lib/interview-session-types";
+import { computeOverall, correctnessFromTests, rubricText, type DimensionScore, type DimensionScores } from "@/lib/grading";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_BODY_CHARS = 160_000;
 const MAX_CODE_CHARS = 32_000;
 const MAX_TRANSCRIPT_CHARS = 100_000;
 
-function clamp10(n: number): number {
-  if (Number.isNaN(n)) return 0;
-  return Math.max(0, Math.min(10, Math.round(n)));
-}
-
-function buildFallbackEvaluation(passed: number, total: number, history: ChatTurn[]): Evaluation {
-  const correctness = total > 0 ? clamp10((passed / total) * 10) : 0;
-  const base = total > 0 ? Math.round((passed / total) * 7) + 1 : 4;
-  const overall = Math.round(
-    ((correctness + base * 4) / 5) * 10
-  ) / 10;
+/**
+ * What the report says when the grader is unavailable: correctness is still
+ * real because it comes from the test run, and everything else is marked
+ * "not assessed" rather than dressed up as a score nobody actually gave.
+ */
+function buildFallbackEvaluation(correctness: DimensionScore, history: ChatTurn[]): Evaluation {
+  const unavailable = { score: null, rationale: "Not assessed: the grader was unavailable for this session." };
+  const scores = { correctness } as DimensionScores;
+  for (const key of gradedKeys) scores[key] = unavailable;
+  const passed = correctness.score ?? 0;
+  const mentionedComplexity = history.some(
+    (turn) => turn.role === "user" && /time complexity|space complexity|big[\s-]?o|\bo\(/i.test(turn.text),
+  );
   return {
-    overall: Math.round(overall * 10),
-    problemSolving: clamp10(base),
-    communication: clamp10(base),
-    correctness,
-    codeQuality: clamp10(base - (passed < total ? 1 : 0)),
-    complexityAnalysis: clamp10(base - 1),
-    debugging: clamp10(base),
+    overall: computeOverall(scores),
+    scores,
     feedback:
-      passed === total
-        ? "Solid work — all test cases passed. Consider narrating your complexity analysis more explicitly next time."
-        : "Some test cases failed. Focus on edge cases (empty input, duplicates, boundaries) and re-check your logic against the examples.",
-    strengths: passed > 0 ? [`Passed ${passed} of ${total} test cases.`] : [],
+      passed === 10
+        ? "All test cases passed. The grader was unavailable, so only correctness is scored — narrating your complexity analysis explicitly is worth practising regardless."
+        : "Some test cases failed. The grader was unavailable, so only correctness is scored. Focus on edge cases (empty input, duplicates, boundaries) and re-check your logic against the examples.",
+    strengths: passed > 0 ? [correctness.rationale] : [],
     weaknesses: [
-      ...(passed < total ? [`Review the ${total - passed} failing test case${total - passed === 1 ? "" : "s"}.`] : []),
-      ...(history.some((turn) => turn.role === "user" && /time complexity|space complexity|big[\s-]?o|\bo\(/i.test(turn.text))
-        ? []
-        : ["Explain the time and space complexity of your approach."]),
+      ...(passed < 10 ? ["Review the failing test cases."] : []),
+      ...(mentionedComplexity ? [] : ["Explain the time and space complexity of your approach."]),
     ],
   };
 }
@@ -74,7 +70,7 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: "Invalid JSON request." }, { status: 400 });
   }
-  const { id, problemId, code, history, startedAt, language } = body;
+  const { id, problemId, code, history, startedAt, language, runs } = body;
   if (
     typeof id !== "string" || !UUID_PATTERN.test(id) ||
     typeof problemId !== "string" ||
@@ -85,7 +81,8 @@ export async function POST(request: Request) {
       (turn.role === "user" || turn.role === "model") &&
       typeof turn.text === "string" && turn.text.length <= 2000
     ) ||
-    typeof startedAt !== "string" || !Number.isFinite(Date.parse(startedAt))
+    typeof startedAt !== "string" || !Number.isFinite(Date.parse(startedAt)) ||
+    (runs !== undefined && (typeof runs !== "number" || !Number.isInteger(runs) || runs < 0 || runs > 10_000))
   ) {
     return NextResponse.json({ error: "Invalid interview submission." }, { status: 400 });
   }
@@ -113,28 +110,51 @@ export async function POST(request: Request) {
   }
   const lang = isLanguage(language) ? language : DEFAULT_LANGUAGE;
   const execResult = await runCode(lang, problem, code);
-  const fallback = buildFallbackEvaluation(execResult.passed, execResult.total, turns);
+  const correctness = correctnessFromTests(execResult.passed, execResult.total, execResult.crashed);
+  const fallback = buildFallbackEvaluation(correctness, turns);
+  const runCount = typeof runs === "number" ? runs : null;
 
   const transcript = turns
     .map((t) => `${t.role === "user" ? "Candidate" : "Interviewer"}: ${t.text}`)
     .join("\n");
 
-  const systemInstruction = `You are grading a technical coding interview. Problem: ${problem.title} - ${problem.description}
+  const starter = problem.starterCode[lang] ?? "";
+  const codeIsStarter = code.trim() === starter.trim();
+  const runSummary = runCount === null
+    ? "Unknown how many times the candidate ran the tests during the interview."
+    : runCount === 0
+      ? "The candidate never ran the tests during the interview."
+      : `The candidate ran the tests ${runCount} time${runCount === 1 ? "" : "s"} during the interview.`;
 
-Final candidate code, written in ${languageLabel(lang)}:
+  const systemInstruction = `You are grading a technical coding interview against a fixed rubric. Be strict and evidence-based: every score must be justified by something in the transcript or the code. Do not give credit for effort that isn't visible.
+
+Problem: ${problem.title} - ${problem.description}
+
+Final candidate code, written in ${languageLabel(lang)}${codeIsStarter ? " (UNCHANGED from the starter template)" : ""}:
 \`\`\`${lang}
 ${code}
 \`\`\`
 
-Test results: ${execResult.passed}/${execResult.total} passed.
-${execResult.crashed ? `Code crashed: ${execResult.crashOutput}` : ""}
+Final test run: ${execResult.passed}/${execResult.total} passed.${execResult.crashed ? ` Code crashed: ${execResult.crashOutput}` : ""}
+${runSummary}
+Correctness has already been scored ${correctness.score ?? "n/a"}/10 from the test run; do not score it.
 
 Interview transcript:
 ${transcript || "(no conversation recorded)"}
 
-Return ONLY a JSON object with this exact shape, all numeric scores 0-10 except overall which is 0-100:
-{"overall": number, "problemSolving": number, "communication": number, "correctness": number, "codeQuality": number, "complexityAnalysis": number, "debugging": number, "feedback": string, "strengths": string[], "weaknesses": string[]}
-Base "correctness" primarily on the test results above. "feedback" should be 2-3 sentences of specific, constructive feedback. Give 1-3 evidence-based strengths and 1-3 specific improvement areas; use empty arrays when there is no evidence for a point.`;
+RUBRIC — score each dimension 0-10 as an integer, interpolating between these anchors:
+
+${rubricText()}
+
+Rules:
+- A score of null means "not assessed" and is ONLY for the situations listed above. If the candidate had the opportunity and didn't take it, that is a low score, not null.
+- Off-topic talk, profanity, or steering the conversation away from the problem lowers communication to 3 or below, however friendly the tone.
+- Nervousness on its own is not penalised; what matters is whether the candidate engaged with the problem.
+- Each "rationale" is one sentence citing concrete evidence (what they said, wrote, or ran). Do not restate the score.
+
+Return ONLY a JSON object with this exact shape:
+{"problemSolving": {"score": number|null, "rationale": string}, "codeQuality": {"score": number|null, "rationale": string}, "communication": {"score": number|null, "rationale": string}, "complexityAnalysis": {"score": number|null, "rationale": string}, "debugging": {"score": number|null, "rationale": string}, "feedback": string, "strengths": string[], "weaknesses": string[]}
+"feedback" is 2-3 sentences of specific, constructive feedback that names the single most valuable thing to work on next. Give 1-3 evidence-based strengths and 1-3 specific improvement areas; use empty arrays when there is no evidence for a point.`;
 
   let evaluation = fallback;
   let mocked = true;
@@ -142,7 +162,7 @@ Base "correctness" primarily on the test results above. "feedback" should be 2-3
     const generated = await generateJson<unknown>(systemInstruction, [
       { role: "user", text: "Grade this interview now." },
     ]);
-    const valid = validatedEvaluation(generated);
+    const valid = validatedEvaluation(generated, correctness);
     if (valid) {
       evaluation = valid;
       mocked = false;

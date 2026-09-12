@@ -1,17 +1,25 @@
 "use client";
 
 import { Button } from "@/components/ui";
-import { metrics, type InterviewSession } from "@/lib/interview-session-types";
+import { bandFor, dimensions } from "@/lib/grading";
+import type { InterviewSession } from "@/lib/interview-session-types";
 
 export default function DownloadReport({ session }: { session: InterviewSession }) {
   function download() {
     const lines = [
       `Interview Report — ${session.problemTitle}`,
       `Completed: ${session.completedAt}`,
-      `Overall Score: ${session.overallScore}/100`,
+      `Overall Score: ${session.overallScore}/100 — ${bandFor(session.overallScore).label}`,
       `Tests: ${session.testsPassed}/${session.testsTotal} passed`,
       "",
-      ...metrics.map(({ key, label }) => `${label}: ${session.evaluation[key]}/10`),
+      "Scores (weight in overall):",
+      ...dimensions.flatMap(({ key, label, weight }) => {
+        const { score, rationale } = session.evaluation.scores[key];
+        return [
+          `- ${label} (${weight}%): ${score === null ? "not assessed" : `${score}/10`}`,
+          ...(rationale ? [`    ${rationale}`] : []),
+        ];
+      }),
       "",
       "Feedback:",
       session.evaluation.feedback,

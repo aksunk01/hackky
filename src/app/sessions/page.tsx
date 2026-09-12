@@ -2,6 +2,7 @@ import Link from "next/link";
 import { SiteHeader } from "@/components/ui";
 import { getOwnerId } from "@/lib/owner-cookie";
 import { listSessions } from "@/lib/interview-sessions";
+import { bandFor } from "@/lib/grading";
 
 export default async function SessionsPage() {
   const ownerId = await getOwnerId();
@@ -54,7 +55,7 @@ export default async function SessionsPage() {
               </div>
               <div className="shrink-0 text-right">
                 <div className="font-semibold text-accent">{session.overallScore}/100</div>
-                <div className="text-xs text-muted">View report →</div>
+                <div className="text-xs text-muted">{bandFor(session.overallScore).label} →</div>
               </div>
             </Link>
           ))}
