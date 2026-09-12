@@ -2,11 +2,12 @@ import "server-only";
 
 import type { RowDataPacket } from "mysql2";
 import { getPool } from "@/lib/mysql";
-import type {
-  ChatTurn,
-  Evaluation,
-  InterviewSession,
-  SessionSummary,
+import {
+  normalizeEvaluation,
+  type ChatTurn,
+  type Evaluation,
+  type InterviewSession,
+  type SessionSummary,
 } from "@/lib/interview-session-types";
 
 type SummaryRow = RowDataPacket & {
@@ -22,7 +23,7 @@ type SessionRow = SummaryRow & {
   problem_id: string;
   transcript_json: ChatTurn[] | string;
   final_code: string;
-  evaluation_json: Evaluation | string;
+  evaluation_json: unknown;
   mocked: number;
   started_at: string;
 };
@@ -86,7 +87,7 @@ export async function getSession(id: string, ownerId: Buffer): Promise<Interview
     problemId: row.problem_id,
     transcript: jsonValue<ChatTurn[]>(row.transcript_json),
     finalCode: row.final_code,
-    evaluation: jsonValue<Evaluation>(row.evaluation_json),
+    evaluation: normalizeEvaluation(jsonValue<unknown>(row.evaluation_json)),
     mocked: Boolean(row.mocked),
     startedAt: utcIso(row.started_at),
   };
