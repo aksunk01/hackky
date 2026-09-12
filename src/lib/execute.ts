@@ -21,6 +21,7 @@ export type ExecutionResult = {
   total: number;
   crashed: boolean;
   crashOutput?: string;
+  stdout?: string;
 };
 
 function buildHarness(problem: Problem, candidateCode: string): string {
@@ -28,6 +29,11 @@ function buildHarness(problem: Problem, candidateCode: string): string {
   return `
 import json
 import sys
+import io
+
+_captured = io.StringIO()
+_real_stdout = sys.stdout
+sys.stdout = _captured
 
 ${candidateCode}
 
@@ -53,7 +59,8 @@ for _t in _tests:
             "error": str(_e),
         })
 
-print(json.dumps(_results))
+sys.stdout = _real_stdout
+print(json.dumps({"results": _results, "stdout": _captured.getvalue()[:4000]}))
 `;
 }
 
@@ -69,12 +76,17 @@ export async function runPython(
       timeout: 5000,
       maxBuffer: 1024 * 1024,
     });
-    const results = JSON.parse(stdout.trim().split("\n").pop() ?? "[]") as TestResult[];
+    const parsed = JSON.parse(stdout.trim().split("\n").pop() ?? "{}") as {
+      results: TestResult[];
+      stdout: string;
+    };
+    const results = parsed.results ?? [];
     return {
       results,
       passed: results.filter((r) => r.passed).length,
       total: results.length,
       crashed: false,
+      stdout: parsed.stdout,
     };
   } catch (err) {
     const message =

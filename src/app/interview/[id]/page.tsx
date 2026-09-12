@@ -250,6 +250,14 @@ export default function InterviewPage({
                     {r.error ? ` (${r.error})` : ""}
                   </div>
                 ))}
+                {testResult.stdout && (
+                  <div className="mt-3 pt-2 border-t border-black/10 dark:border-white/10">
+                    <div className="font-semibold mb-1">Console output</div>
+                    <pre className="whitespace-pre-wrap text-black/70 dark:text-white/70">
+                      {testResult.stdout}
+                    </pre>
+                  </div>
+                )}
               </>
             )}
           </div>
