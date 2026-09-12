@@ -99,6 +99,9 @@ export function SiteHeader({ active }: { active?: "practice" | "about" }) {
         >
           Practice
         </Link>
+        <Link href="/sessions" className="text-muted hover:text-foreground transition-colors">
+          History
+        </Link>
         <span className="text-muted/60 cursor-default">About</span>
       </nav>
     </header>
