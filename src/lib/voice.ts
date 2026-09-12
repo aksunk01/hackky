@@ -1,6 +1,3 @@
-const SPEECH_API_BASE_URL =
-  process.env.NEXT_PUBLIC_SPEECH_API_URL ?? "http://localhost:3000";
-
 /** Preferred recording containers, best first. Safari supports none of the webm ones. */
 const RECORDING_MIME_TYPES = [
   "audio/webm;codecs=opus",
@@ -20,8 +17,10 @@ const MIN_SPEECH_MS = 300;
 const MAX_UTTERANCE_MS = 30_000;
 /** Rotate a silent recording rather than buffering quiet audio forever. */
 const IDLE_ROTATE_MS = 10_000;
-/** Keep ignoring the mic briefly after playback, to let room echo die out. */
-const ECHO_TAIL_MS = 400;
+/** How often an in-progress utterance is re-transcribed for a live preview. */
+const PARTIAL_INTERVAL_MS = 1_200;
+/** Keep the mic closed briefly after playback, to let room echo die out. */
+const ECHO_TAIL_MS = 700;
 
 export function isMicrophoneRecordingSupported(): boolean {
   return (
@@ -42,21 +41,21 @@ class TranscriptionError extends Error {
 }
 
 /**
- * Statuses that mean the backend will never transcribe for us — a missing
- * `speech_to_text` key permission or an unpaid plan. Retrying is pointless, so
- * these are what trigger the browser fallback; anything else (a 500, a dropped
- * connection) is treated as transient.
+ * Statuses that mean the backend will never transcribe for us — an unconfigured
+ * key (503), a missing `speech_to_text` key permission, or an unpaid plan.
+ * Retrying is pointless, so these are what trigger the browser fallback;
+ * anything else (a 500, a dropped connection) is treated as transient.
  */
 function isUnrecoverable(error: unknown): boolean {
   return (
     error instanceof TranscriptionError &&
-    [401, 402, 403, 404].includes(error.status)
+    [401, 402, 403, 404, 503].includes(error.status)
   );
 }
 
 /** Uploads recorded audio to our Scribe-backed endpoint and returns the transcript. */
 async function transcribe(blob: Blob, contentType: string): Promise<string> {
-  const res = await fetch(`${SPEECH_API_BASE_URL}/api/transcribe-audio`, {
+  const res = await fetch("/api/transcribe-audio", {
     method: "POST",
     // The backend forwards this as the upload's content type, so it has to be
     // the container MediaRecorder actually produced.
@@ -83,16 +82,95 @@ let current: { audio: HTMLAudioElement; url: string } | null = null;
 /** Lets stopSpeaking() cancel a request whose audio hasn't arrived yet. */
 let inFlight: AbortController | null = null;
 /** True while the interviewer's voice is actually coming out of the speakers. */
-let playing = false;
+let audible = false;
+/**
+ * True from the moment we've committed to a reply (asked the model, about to
+ * synthesize and speak it) until it's actually done — covers the model call
+ * and TTS request/generation, both of which can take seconds and would
+ * otherwise leave the mic open for the candidate to talk over the reply
+ * before `audible` ever flips.
+ */
+let interviewerBusy = false;
 /** Echo grace period after playback stops. */
 let echoTailUntil = 0;
+let echoTailTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Notified when the mic should close (true) or may reopen (false). */
+const speakingListeners = new Set<(speaking: boolean) => void>();
 
 /**
- * Whether the interviewer is audible right now. The always-on listener uses
- * this to avoid transcribing the AI's own voice back into the conversation.
+ * Whether the mic should be held closed right now: playback is audible, a
+ * reply is being composed/synthesized, or we're still in the post-playback
+ * echo tail. The always-on listener uses this to avoid transcribing the AI's
+ * own voice (or talking over a reply that hasn't started playing yet) back
+ * into the conversation.
  */
 function isSpeaking(): boolean {
-  return playing || Date.now() < echoTailUntil;
+  return audible || interviewerBusy || Date.now() < echoTailUntil;
+}
+
+/**
+ * Marks whether the interviewer is composing a reply — call this the moment
+ * a model request starts, and clear it once the reply has either been spoken
+ * or (if voice is off) just landed as text. The mic stays closed for the
+ * whole span so the candidate can never start talking into a gap before the
+ * reply's TTS audio is ready to play.
+ */
+export function setInterviewerBusy(busy: boolean) {
+  if (busy === interviewerBusy) return;
+  interviewerBusy = busy;
+  // Reflect the combined state, not just this flag: if playback or the echo
+  // tail is still holding the mic shut, a listener must not see "false" here.
+  const speaking = isSpeaking();
+  speakingListeners.forEach((listener) => listener(speaking));
+}
+
+/**
+ * Subscribes to the interviewer's playback state. Listening engines use this to
+ * close the mic for the duration rather than filtering afterwards: by the time
+ * a transcript arrives the playback that produced it has usually already
+ * finished, so a check at that point can't tell our own voice from the user's.
+ *
+ * Fires `false` only once the echo tail has elapsed, so it is safe to reopen
+ * the mic the moment a listener sees it.
+ */
+export function subscribeSpeaking(listener: (speaking: boolean) => void): () => void {
+  speakingListeners.add(listener);
+  return () => {
+    speakingListeners.delete(listener);
+  };
+}
+
+/** True while the mic is held closed for playback — the UI says so. */
+export function isInterviewerSpeaking(): boolean {
+  return isSpeaking();
+}
+
+/** Flips the shared playback state and tells the listening engines about it. */
+function setAudible(next: boolean) {
+  if (next === audible) return;
+  audible = next;
+
+  if (echoTailTimer !== null) {
+    clearTimeout(echoTailTimer);
+    echoTailTimer = null;
+  }
+
+  if (next) {
+    echoTailUntil = 0;
+    speakingListeners.forEach((listener) => listener(true));
+    return;
+  }
+
+  // Hold the mic closed a moment longer, so the room's echo of the last
+  // syllable isn't the first thing it hears.
+  echoTailUntil = Date.now() + ECHO_TAIL_MS;
+  echoTailTimer = setTimeout(() => {
+    echoTailTimer = null;
+    // Re-check the combined state rather than assuming "false": a new reply
+    // may have started composing (interviewerBusy) during the tail.
+    if (!audible) speakingListeners.forEach((listener) => listener(isSpeaking()));
+  }, ECHO_TAIL_MS);
 }
 
 function releaseCurrent() {
@@ -102,8 +180,7 @@ function releaseCurrent() {
   // leaked object URLs would accumulate for the life of the interview.
   URL.revokeObjectURL(current.url);
   current = null;
-  playing = false;
-  echoTailUntil = Date.now() + ECHO_TAIL_MS;
+  setAudible(false);
 }
 
 /**
@@ -117,9 +194,15 @@ export async function speak(text: string) {
 
   const controller = new AbortController();
   inFlight = controller;
+  let element: HTMLAudioElement | null = null;
+
+  // Close the mic *before* the request goes out, not after it resolves: the
+  // fetch + TTS synthesis can take seconds, and that whole window is otherwise
+  // an open mic the candidate can talk over the about-to-arrive reply into.
+  setAudible(true);
 
   try {
-    const res = await fetch(`${SPEECH_API_BASE_URL}/api/stream-speech`, {
+    const res = await fetch("/api/stream-speech", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
@@ -141,21 +224,25 @@ export async function speak(text: string) {
 
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
+    element = audio;
     current = { audio, url };
 
     audio.addEventListener("ended", () => {
       if (current?.audio === audio) releaseCurrent();
     });
 
+    // Already closed above, well before the first syllable.
     await audio.play();
-    // Only now is the mic at risk of hearing us, so gate on real playback
-    // rather than on the request starting.
-    if (current?.audio === audio) playing = true;
   } catch (error) {
     if (controller.signal.aborted) return;
     if (inFlight === controller) inFlight = null;
-    // A failed synthesis must not leave the mic suppressed forever.
-    playing = false;
+    // A failed synthesis must not leave the mic closed forever. Only clean up
+    // if a later utterance hasn't already superseded ours.
+    if (element && current?.audio === element) releaseCurrent();
+    // The mic was closed before the fetch even started, but there's no
+    // `current` for releaseCurrent() to tear down if synthesis failed before
+    // playback began — reopen explicitly in that case.
+    else if (inFlight === null) setAudible(false);
     console.error("[speak] text-to-speech failed:", error);
   }
 }
@@ -164,6 +251,10 @@ export function stopSpeaking() {
   inFlight?.abort();
   inFlight = null;
   releaseCurrent();
+  // releaseCurrent() only flips audible false if `current` exists; stopSpeaking()
+  // can also be called while a request is still in flight (mic already closed
+  // by speak(), before any audio element existed), so reopen unconditionally.
+  setAudible(false);
 }
 
 /* --------------------------------------------------------------- listening -- */
@@ -175,6 +266,10 @@ type Segment = {
   /** Accumulated voiced time, used to tell speech from a stray noise. */
   loudMs: number;
   lastLoudAt: number;
+  /** When the segment was last flushed out for a live-preview transcription. */
+  lastPartialAt: number;
+  /** Guards against overlapping partial requests for the same segment. */
+  partialInFlight: boolean;
 };
 
 /**
@@ -186,6 +281,7 @@ type Segment = {
  */
 function startBackendListening(
   onResult: (transcript: string) => void,
+  onPartial: (transcript: string) => void,
   onEnd: () => void,
   onUnavailable: () => void
 ): (() => void) | null {
@@ -203,6 +299,7 @@ function startBackendListening(
   let context: AudioContext | null = null;
   let ticker: ReturnType<typeof setInterval> | null = null;
   let detachResume: (() => void) | null = null;
+  let unsubscribeSpeaking: (() => void) | null = null;
   let mimeType: string | undefined;
 
   // One MediaRecorder per utterance: webm chunks after the first aren't
@@ -216,6 +313,14 @@ function startBackendListening(
     ended = true;
     onEnd();
   };
+
+  /** The container MediaRecorder actually used, plus the bytes captured so far. */
+  function segmentBlob(active: Segment): { blob: Blob; type: string } {
+    // The browser may have fallen back to a different container than we asked
+    // for, so trust the recorder over our preference list.
+    const type = active.recorder.mimeType || mimeType || "audio/webm";
+    return { blob: new Blob(active.chunks, { type }), type };
+  }
 
   function beginSegment() {
     if (stopped || !stream) return;
@@ -234,6 +339,8 @@ function startBackendListening(
       startedAt: Date.now(),
       loudMs: 0,
       lastLoudAt: 0,
+      lastPartialAt: 0,
+      partialInFlight: false,
     };
     segment = active;
 
@@ -249,21 +356,64 @@ function startBackendListening(
     recorder.start();
   }
 
+  /**
+   * Re-transcribes the utterance so far, so the candidate sees words appear
+   * while they're still talking instead of a beat after they stop.
+   * `requestData()` flushes the recorder's internal buffer through the same
+   * `dataavailable` handler `endSegment` uses, without stopping the recording;
+   * the chunks captured since the segment began already form a valid,
+   * independently-decodable container.
+   */
+  function maybeRequestPartial(active: Segment, now: number) {
+    if (active.partialInFlight) return;
+    if (active.loudMs < MIN_SPEECH_MS) return;
+    if (now - active.lastPartialAt < PARTIAL_INTERVAL_MS) return;
+
+    active.lastPartialAt = now;
+    active.partialInFlight = true;
+    active.recorder.requestData();
+
+    // dataavailable is delivered as a separate task, so give it a tick before
+    // reading the chunks it appends.
+    setTimeout(() => {
+      active.partialInFlight = false;
+      if (stopped || segment !== active) return;
+
+      const { blob, type } = segmentBlob(active);
+      if (blob.size === 0) return;
+
+      void (async () => {
+        try {
+          const text = await transcribe(blob, type);
+          // The segment may have ended (or been superseded) while this was in
+          // flight; a final result is already on its way in that case.
+          if (!stopped && segment === active && text) onPartial(text);
+        } catch (error) {
+          // Silent: this is a best-effort preview, and the same segment's
+          // final transcription (or the unavailable/error handling there)
+          // will surface anything that actually matters.
+          console.warn("[startListening] partial transcription failed:", error);
+        }
+      })();
+    }, 0);
+  }
+
   /** Closes the current segment, transcribing it only if it held real speech. */
   function endSegment(upload: boolean) {
     const active = segment;
     segment = null;
     if (!active) return;
 
+    // The live preview is superseded by either the final transcript (about to
+    // be requested below) or nothing at all — either way, stop showing it.
+    onPartial("");
+
     const worthSending = upload && active.loudMs >= MIN_SPEECH_MS;
 
     active.recorder.addEventListener("stop", () => {
       if (!worthSending) return;
 
-      // The browser may have fallen back to a different container than we asked
-      // for, so trust the recorder over our preference list.
-      const type = active.recorder.mimeType || mimeType || "audio/webm";
-      const blob = new Blob(active.chunks, { type });
+      const { blob, type } = segmentBlob(active);
       if (blob.size === 0) return;
 
       void (async () => {
@@ -271,10 +421,15 @@ function startBackendListening(
           const text = await transcribe(blob, type);
           if (!stopped && text) onResult(text);
         } catch (error) {
-          console.error("[startListening] transcription failed:", error);
           // A bad key or unpaid plan won't recover on the next utterance, so
-          // hand off instead of failing silently on every turn.
-          if (!stopped && isUnrecoverable(error)) onUnavailable();
+          // hand off instead of failing silently on every turn. That path is
+          // handled, so it's a warning — only surprises are errors.
+          if (isUnrecoverable(error)) {
+            console.warn("[startListening] transcription unavailable:", error);
+            if (!stopped) onUnavailable();
+          } else {
+            console.error("[startListening] transcription failed:", error);
+          }
         }
       })();
     });
@@ -282,11 +437,19 @@ function startBackendListening(
     if (active.recorder.state !== "inactive") active.recorder.stop();
   }
 
+  /** Mutes or unmutes the capture device for the interviewer's playback. */
+  function setMicMuted(muted: boolean) {
+    stream?.getAudioTracks().forEach((track) => {
+      track.enabled = !muted;
+    });
+  }
+
   function onTick(rms: number) {
     const now = Date.now();
 
-    // The interviewer's own playback bleeds into the mic; throw away anything
-    // captured while it talks instead of replying to ourselves.
+    // Belt and braces: the track is muted for playback, but the VAD still runs,
+    // so drop any segment straddling the transition instead of uploading a
+    // half-second of our own voice.
     if (isSpeaking()) {
       if (segment) endSegment(false);
       return;
@@ -303,6 +466,8 @@ function startBackendListening(
     }
 
     const hasSpeech = segment.loudMs >= MIN_SPEECH_MS;
+
+    if (hasSpeech) maybeRequestPartial(segment, now);
 
     // Spoke, then went quiet: that's a finished turn.
     if (hasSpeech && now - segment.lastLoudAt >= SILENCE_HANGOVER_MS) {
@@ -354,6 +519,18 @@ function startBackendListening(
       MediaRecorder.isTypeSupported(type)
     );
 
+    // The mic may have been granted mid-sentence, so sync before subscribing.
+    setMicMuted(isSpeaking());
+    unsubscribeSpeaking = subscribeSpeaking((speaking) => {
+      if (stopped) return;
+      setMicMuted(speaking);
+      if (speaking) {
+        endSegment(false);
+      } else if (!segment) {
+        beginSegment();
+      }
+    });
+
     const audioContext = new AudioContextCtor();
     context = audioContext;
 
@@ -394,6 +571,8 @@ function startBackendListening(
     ticker = null;
     detachResume?.();
     detachResume = null;
+    unsubscribeSpeaking?.();
+    unsubscribeSpeaking = null;
 
     // Muting means "stop listening", not "send what I was mid-way through".
     endSegment(false);
@@ -410,7 +589,14 @@ function startBackendListening(
 /* ------------------------------------------------ browser fallback engine -- */
 
 interface SpeechRecognitionResultLike {
-  results: ArrayLike<ArrayLike<{ transcript: string }>>;
+  /** Index of the first result this event revises; earlier ones are settled. */
+  resultIndex: number;
+  results: ArrayLike<
+    ArrayLike<{ transcript: string }> & {
+      /** False while the engine is still revising this phrase. */
+      isFinal: boolean;
+    }
+  >;
 }
 
 interface MinimalSpeechRecognition {
@@ -422,6 +608,8 @@ interface MinimalSpeechRecognition {
   onend: (() => void) | null;
   start: () => void;
   stop: () => void;
+  /** Ends the session and discards audio already captured, unlike stop(). */
+  abort: () => void;
 }
 
 function getRecognitionCtor(): (new () => MinimalSpeechRecognition) | undefined {
@@ -440,23 +628,57 @@ function getRecognitionCtor(): (new () => MinimalSpeechRecognition) | undefined 
  */
 function startBrowserListening(
   onResult: (transcript: string) => void,
+  onPartial: (transcript: string) => void,
   onEnd: () => void
 ): (() => void) | null {
   const Ctor = getRecognitionCtor();
   if (!Ctor) return null;
 
   let stopped = false;
+  /** Whether a recognition session is currently open. start() throws if one is. */
+  let running = false;
+  /** Closed for the interviewer's playback; resumes when it finishes. */
+  let suppressed = false;
+
   const recognition = new Ctor();
   recognition.continuous = true;
-  recognition.interimResults = false;
+  // Revised guesses as the words come out, so the transcript appears while the
+  // candidate is still talking instead of a beat after they stop.
+  recognition.interimResults = true;
   recognition.lang = "en-US";
 
+  /** Opens a session, reporting whether it took. */
+  function begin(): boolean {
+    if (stopped || suppressed || running) return true;
+    try {
+      recognition.start();
+      running = true;
+      return true;
+    } catch (error) {
+      console.error("[startListening] browser recognition failed to start:", error);
+      return false;
+    }
+  }
+
   recognition.onresult = (event) => {
-    const latest = event.results[event.results.length - 1];
-    const transcript = latest?.[0]?.transcript?.trim();
-    // Drop anything picked up while the interviewer is talking, so it doesn't
-    // transcribe its own voice — same guard the backend engine uses.
-    if (!stopped && transcript && !isSpeaking()) onResult(transcript);
+    // Last line of defence. Results describe audio captured some time ago, so
+    // one that *arrives* now may have been *spoken* during playback — the
+    // session is aborted for playback precisely because this check can't tell.
+    if (stopped || suppressed || isSpeaking()) return;
+
+    // Everything before resultIndex is settled and already reported.
+    let pending = "";
+    for (let i = event.resultIndex; i < event.results.length; i += 1) {
+      const result = event.results[i];
+      const transcript = result?.[0]?.transcript?.trim();
+      if (!transcript) continue;
+
+      if (result!.isFinal) onResult(transcript);
+      else pending = pending ? `${pending} ${transcript}` : transcript;
+    }
+
+    // Empty once the phrase settles, which clears the live line.
+    onPartial(pending);
   };
 
   recognition.onerror = () => {
@@ -465,45 +687,101 @@ function startBrowserListening(
   };
 
   recognition.onend = () => {
+    running = false;
     if (stopped) {
       onEnd();
       return;
     }
+    // Aborted for playback; the subscription below reopens it afterwards.
+    if (suppressed) return;
     // Chrome ends a session on its own every so often; restart to stay on.
-    try {
-      recognition.start();
-    } catch {
-      onEnd();
-    }
+    if (!begin()) onEnd();
   };
 
-  try {
-    recognition.start();
-  } catch (error) {
-    console.error("[startListening] browser recognition failed to start:", error);
+  const unsubscribeSpeaking = subscribeSpeaking((speaking) => {
+    if (stopped) return;
+    suppressed = speaking;
+    if (speaking) {
+      // abort(), not stop(): stop() finalizes the phrase in progress and
+      // delivers it, which is exactly the interviewer's own voice we're trying
+      // to throw away.
+      if (running) recognition.abort();
+      // Whatever was mid-phrase is being discarded, so stop showing it.
+      onPartial("");
+    } else {
+      begin();
+    }
+  });
+
+  // Starting mid-playback would capture the tail of the current sentence.
+  if (isSpeaking()) {
+    suppressed = true;
+  } else if (!begin()) {
+    unsubscribeSpeaking();
     return null;
   }
 
   return () => {
     if (stopped) return;
     stopped = true;
-    recognition.stop();
+    unsubscribeSpeaking();
+    onPartial("");
+    if (running) recognition.stop();
+    else onEnd();
   };
 }
 
 /* ------------------------------------------------------------ orchestrator -- */
 
+const STT_UNAVAILABLE_KEY = "interviewai:backend-stt-unavailable";
+
 /**
  * Set once the backend has proven it can't transcribe, so later sessions skip
- * straight to the fallback instead of re-failing on every utterance. Resets on
- * reload, which is what picks up a repaired API key.
+ * straight to the fallback instead of re-failing on every utterance.
+ *
+ * Cached in sessionStorage because discovering it costs a whole utterance: the
+ * words spoken during the failed attempt are gone, and with them the live
+ * transcript for the candidate's first sentence after every reload. It's
+ * per-tab and cleared when the tab closes, so a repaired key is picked up by a
+ * new tab rather than needing a cache-busting story.
  */
-let backendSttUnavailable = false;
+let backendSttUnavailable: boolean | null = null;
 
-/** Which engine produced the most recent transcript. Useful for UI messaging. */
-export function isUsingFallbackTranscription(): boolean {
+function isBackendSttUnavailable(): boolean {
+  if (backendSttUnavailable === null) {
+    try {
+      backendSttUnavailable =
+        typeof sessionStorage !== "undefined" &&
+        sessionStorage.getItem(STT_UNAVAILABLE_KEY) === "1";
+    } catch {
+      // Storage can be blocked outright; falling back to "try it" is fine.
+      backendSttUnavailable = false;
+    }
+  }
   return backendSttUnavailable;
 }
+
+function markBackendSttUnavailable() {
+  backendSttUnavailable = true;
+  try {
+    sessionStorage?.setItem(STT_UNAVAILABLE_KEY, "1");
+  } catch {
+    // Not worth failing the interview over a storage quota.
+  }
+}
+
+export type ListeningCallbacks = {
+  /** A finished utterance, ready to act on. */
+  onResult: (transcript: string) => void;
+  /**
+   * The utterance still in progress, revised as more words arrive, and `""`
+   * once nothing is pending. Both engines produce these: the browser engine
+   * revises its guess continuously, while the Scribe engine periodically
+   * re-transcribes the recording so far.
+   */
+  onPartial?: (transcript: string) => void;
+  onEnd: () => void;
+};
 
 /**
  * Holds the microphone open and reports each utterance as the speaker finishes
@@ -514,10 +792,11 @@ export function isUsingFallbackTranscription(): boolean {
  * plan). `onResult` may fire many times; `onEnd` fires once, when listening
  * stops for good. Returns null if no engine is available at all.
  */
-export function startListening(
-  onResult: (transcript: string) => void,
-  onEnd: () => void
-): (() => void) | null {
+export function startListening({
+  onResult,
+  onPartial = () => {},
+  onEnd,
+}: ListeningCallbacks): (() => void) | null {
   let stopped = false;
   let ended = false;
   let swapping = false;
@@ -538,19 +817,19 @@ export function startListening(
 
   const startFallback = () => {
     if (stopped) return;
-    active = startBrowserListening(onResult, innerEnd);
+    active = startBrowserListening(onResult, onPartial, innerEnd);
     if (!active) {
       console.error("[startListening] no transcription engine available");
       finish();
     }
   };
 
-  if (backendSttUnavailable) {
+  if (isBackendSttUnavailable()) {
     startFallback();
   } else {
-    active = startBackendListening(onResult, innerEnd, () => {
-      if (stopped || backendSttUnavailable) return;
-      backendSttUnavailable = true;
+    active = startBackendListening(onResult, onPartial, innerEnd, () => {
+      if (stopped || isBackendSttUnavailable()) return;
+      markBackendSttUnavailable();
       console.warn(
         "[startListening] backend transcription unavailable; " +
           "falling back to the browser's speech recognition"
@@ -574,6 +853,8 @@ export function startListening(
     if (stopped) return;
     stopped = true;
     const current = active;
+    // Each engine clears its own pending partial on the way out, including
+    // during an engine swap, where this teardown doesn't run.
     active = null;
     current?.();
     finish();

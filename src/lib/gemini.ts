@@ -1,4 +1,18 @@
-import { GoogleGenAI } from "@google/genai";
+import { ApiError, GoogleGenAI } from "@google/genai";
+
+/**
+ * gemini-3.6-flash returns 429 on the free tier almost immediately — its
+ * `generate_content_free_tier_requests` allowance is 20 — which silently
+ * demoted the interviewer to scripted replies. 3.5-flash is a generation older
+ * and has its own quota. Override with GEMINI_MODEL if you have headroom on a
+ * newer one; note gemini-2.5-* 404s on v1beta.
+ */
+const MODEL = process.env.GEMINI_MODEL ?? "gemini-3.5-flash";
+
+/** Transient failures worth another try: quota bounces and backend blips. */
+const RETRYABLE_STATUSES = new Set([429, 500, 502, 503]);
+/** One retry. A quota wait is ~13s, and an interview reply can't stall forever. */
+const MAX_ATTEMPTS = 2;
 
 let cachedClient: GoogleGenAI | null = null;
 
@@ -15,6 +29,43 @@ function getClient(): GoogleGenAI | null {
 
 export type ChatTurn = { role: "user" | "model"; text: string };
 
+/**
+ * Whether a failure is the free tier's rate limit rather than a real fault.
+ * Callers surface this differently: the key works, there's just no quota left
+ * this minute, and pretending otherwise looks like the model ignoring input.
+ */
+export function isQuotaError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 429;
+}
+
+/**
+ * How long to wait before retrying, or null if the failure won't fix itself.
+ * A quota bounce comes back with the wait baked into the message, so honour
+ * that rather than guessing at it.
+ */
+function retryDelayMs(error: unknown, attempt: number): number | null {
+  if (!(error instanceof ApiError) || !RETRYABLE_STATUSES.has(error.status)) {
+    return null;
+  }
+  const suggested = /retry in ([\d.]+)\s*s/i.exec(error.message);
+  const ms = suggested ? Number(suggested[1]) * 1000 + 250 : 700 * 2 ** attempt;
+  return Math.min(ms, 15_000);
+}
+
+async function withRetry<T>(call: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await call();
+    } catch (error) {
+      const delay =
+        attempt + 1 < MAX_ATTEMPTS ? retryDelayMs(error, attempt) : null;
+      if (delay === null) throw error;
+      console.warn(`[gemini] transient failure; retrying in ${delay}ms`);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+}
+
 export async function generateText(
   systemInstruction: string,
   history: ChatTurn[]
@@ -22,14 +73,16 @@ export async function generateText(
   const client = getClient();
   if (!client) return null;
 
-  const response = await client.models.generateContent({
-    model: "gemini-3.6-flash",
-    contents: history.map((turn) => ({
-      role: turn.role,
-      parts: [{ text: turn.text }],
-    })),
-    config: { systemInstruction },
-  });
+  const response = await withRetry(() =>
+    client.models.generateContent({
+      model: MODEL,
+      contents: history.map((turn) => ({
+        role: turn.role,
+        parts: [{ text: turn.text }],
+      })),
+      config: { systemInstruction },
+    })
+  );
 
   return response.text ?? null;
 }
@@ -41,17 +94,19 @@ export async function generateJson<T>(
   const client = getClient();
   if (!client) return null;
 
-  const response = await client.models.generateContent({
-    model: "gemini-3.6-flash",
-    contents: history.map((turn) => ({
-      role: turn.role,
-      parts: [{ text: turn.text }],
-    })),
-    config: {
-      systemInstruction,
-      responseMimeType: "application/json",
-    },
-  });
+  const response = await withRetry(() =>
+    client.models.generateContent({
+      model: MODEL,
+      contents: history.map((turn) => ({
+        role: turn.role,
+        parts: [{ text: turn.text }],
+      })),
+      config: {
+        systemInstruction,
+        responseMimeType: "application/json",
+      },
+    })
+  );
 
   const text = response.text;
   if (!text) return null;
