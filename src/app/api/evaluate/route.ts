@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
+import { DEFAULT_LANGUAGE, isLanguage, languageLabel } from "@/lib/languages";
 import { getProblem } from "@/lib/problems";
-import { runPython } from "@/lib/execute";
+import { runCode } from "@/lib/execute";
 import { generateJson } from "@/lib/gemini";
 import { getOwnerId } from "@/lib/owner-cookie";
 import { describeDatabaseError } from "@/lib/mysql";
@@ -73,7 +74,7 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: "Invalid JSON request." }, { status: 400 });
   }
-  const { id, problemId, code, history, startedAt } = body;
+  const { id, problemId, code, history, startedAt, language } = body;
   if (
     typeof id !== "string" || !UUID_PATTERN.test(id) ||
     typeof problemId !== "string" ||
@@ -110,8 +111,8 @@ export async function POST(request: Request) {
     console.error("MySQL report lookup failed:", describeDatabaseError(error));
     return NextResponse.json({ error: "Report storage is unavailable. Check MySQL and retry." }, { status: 503 });
   }
-
-  const execResult = await runPython(problem, code);
+  const lang = isLanguage(language) ? language : DEFAULT_LANGUAGE;
+  const execResult = await runCode(lang, problem, code);
   const fallback = buildFallbackEvaluation(execResult.passed, execResult.total, turns);
 
   const transcript = turns
@@ -120,8 +121,8 @@ export async function POST(request: Request) {
 
   const systemInstruction = `You are grading a technical coding interview. Problem: ${problem.title} - ${problem.description}
 
-Final candidate code:
-\`\`\`python
+Final candidate code, written in ${languageLabel(lang)}:
+\`\`\`${lang}
 ${code}
 \`\`\`
 

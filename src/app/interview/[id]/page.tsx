@@ -5,7 +5,9 @@ import { useRouter } from "next/navigation";
 import Editor from "@monaco-editor/react";
 import { getProblem } from "@/lib/problems";
 import type { ExecutionResult } from "@/lib/execute";
+import { LANGUAGES, type Language } from "@/lib/languages";
 import { Button, DifficultyBadge, Logo } from "@/components/ui";
+import { formatClock, timerConfigFromSearch, type TimerConfig } from "@/lib/timer";
 import {
   isInterviewerSpeaking,
   isMicrophoneRecordingSupported,
@@ -19,7 +21,10 @@ import {
 type ChatTurn = { role: "user" | "model"; text: string };
 
 /** What the candidate did in the editor, when it wasn't them talking. */
-type InterviewEvent = "run" | "code-review";
+type InterviewEvent = "run" | "code-review" | "periodic-check";
+
+/** Whether the candidate was writing code or doing nothing during a periodic check's window. */
+type ActivitySinceLastCheck = "idle" | "typing";
 
 type InterviewReply = {
   reply: string | null;
@@ -32,6 +37,7 @@ type SubmissionSnapshot = {
   problemId: string;
   history: ChatTurn[];
   code: string;
+  language: Language;
   startedAt: string;
 };
 
@@ -39,6 +45,12 @@ type SubmissionSnapshot = {
 const IDLE_REVIEW_MS = 12_000;
 /** Non-whitespace characters of change worth a comment. */
 const MIN_CODE_DELTA = 15;
+/**
+ * How often Alex checks in on direction, independent of the quick idle review
+ * above. Cut to 20s outside production so the behavior can be exercised
+ * without sitting through the real 2-minute cadence.
+ */
+const PERIODIC_CHECK_MS = process.env.NODE_ENV === "production" ? 2 * 60_000 : 20_000;
 
 function noSubscription() {
   return () => {};
@@ -46,6 +58,15 @@ function noSubscription() {
 
 function unsupported() {
   return false;
+}
+
+/** The query string never changes during a mounted interview, so read it once. */
+function getSearchSnapshot() {
+  return window.location.search;
+}
+
+function getSearchServerSnapshot() {
+  return "";
 }
 
 /**
@@ -59,6 +80,104 @@ function hasMeaningfulChange(next: string, seen: string): boolean {
   return a !== b && Math.abs(a.length - b.length) >= MIN_CODE_DELTA;
 }
 
+/**
+ * A pill trigger with a per-language color dot, opening a small menu — reads
+ * as a real language switcher rather than a plain form control sitting in the
+ * editor's header.
+ */
+function LanguagePicker({
+  languages,
+  value,
+  onChange,
+  disabled = false,
+}: {
+  languages: { id: Language; label: string; color: string }[];
+  value: Language;
+  onChange: (next: Language) => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const current = languages.find((lang) => lang.id === value) ?? languages[0];
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(e: MouseEvent) {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  if (!current) return null;
+
+  return (
+    <div className="relative" ref={rootRef}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen((prev) => !prev)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className="flex items-center gap-2 rounded-full border border-border-strong bg-subtle pl-2.5 pr-2 py-1.5 text-sm font-medium hover:bg-border-strong/60 transition-colors"
+      >
+        <span
+          className="h-2 w-2 rounded-full shrink-0"
+          style={{ background: current.color }}
+          aria-hidden
+        />
+        {current.label}
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          fill="none"
+          className={`text-muted transition-transform ${open ? "rotate-180" : ""}`}
+          aria-hidden
+        >
+          <path d="M2.5 4.5L6 8l3.5-3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          role="listbox"
+          className="absolute left-0 top-[calc(100%+6px)] z-10 w-44 rounded-xl border border-border bg-card p-1 shadow-lg animate-fade-up"
+        >
+          {languages.map((lang) => (
+            <button
+              key={lang.id}
+              type="button"
+              role="option"
+              aria-selected={lang.id === value}
+              onClick={() => {
+                onChange(lang.id);
+                setOpen(false);
+              }}
+              className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm transition-colors ${
+                lang.id === value ? "bg-subtle font-medium" : "hover:bg-subtle"
+              }`}
+            >
+              <span
+                className="h-2 w-2 rounded-full shrink-0"
+                style={{ background: lang.color }}
+                aria-hidden
+              />
+              {lang.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function InterviewPage({
   params,
 }: {
@@ -68,7 +187,16 @@ export default function InterviewPage({
   const problem = getProblem(id);
   const router = useRouter();
 
-  const [code, setCode] = useState(problem?.starterCode ?? "");
+  // Only offer languages this problem actually has starter code for.
+  const availableLanguages = LANGUAGES.filter((lang) => problem?.starterCode[lang.id]);
+  const [language, setLanguage] = useState<Language>(
+    availableLanguages[0]?.id ?? "python"
+  );
+  // Kept per language so switching back doesn't throw away an attempt.
+  const [drafts, setDrafts] = useState<Partial<Record<Language, string>>>(
+    () => ({ ...problem?.starterCode })
+  );
+  const code = drafts[language] ?? "";
   const [messages, setMessages] = useState<ChatTurn[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
@@ -97,11 +225,19 @@ export default function InterviewPage({
   // The utterance in progress, before it's a finished message.
   const [partial, setPartial] = useState("");
   const [demoReason, setDemoReason] = useState<string | null>(null);
+  // Read from the URL the problem picker built (?timer=strict&minutes=N);
+  // defaults to a free count-up clock when the interview was opened directly.
+  const search = useSyncExternalStore(noSubscription, getSearchSnapshot, getSearchServerSnapshot);
+  const timerConfig: TimerConfig = timerConfigFromSearch(search);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const sessionStart = useRef(Date.now());
+  const autoSubmitted = useRef(false);
+  const deadlineReachedRef = useRef(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const greeted = useRef(false);
   // The editor contents Alex has already commented on, so an idle review only
   // fires for code he hasn't seen.
-  const reviewedCode = useRef(problem?.starterCode ?? "");
+  const reviewedCode = useRef(problem?.starterCode[language] ?? "");
   // State, but read from timers and callbacks that mustn't wait for a render.
   const busy = useRef(false);
   const runningRef = useRef(false);
@@ -111,6 +247,22 @@ export default function InterviewPage({
   // The listener is started once and outlives many renders, so its callback has
   // to reach the current sendMessage rather than the one captured at start.
   const sendMessageRef = useRef<(text: string) => void>(() => {});
+  // The periodic direction check runs off a fixed interval rather than a
+  // render, so it reads these refs instead of the state captured at mount.
+  const codeRef = useRef(code);
+  const messagesRef = useRef(messages);
+  const codeAtLastCheck = useRef(problem?.starterCode[language] ?? "");
+  const talkedSinceLastCheck = useRef(false);
+  // Same reason as sendMessageRef: the interval below is set up once, but
+  // askInterviewer closes over whichever code/messages were current the
+  // render it was defined in, so the interval must call through a ref that's
+  // re-pointed every render instead of the closure it captured at mount.
+  const askInterviewerRef = useRef<(options: {
+    history: ChatTurn[];
+    event?: InterviewEvent;
+    result?: ExecutionResult | null;
+    activity?: ActivitySinceLastCheck;
+  }) => Promise<void>>(async () => {});
 
   useEffect(() => stopSpeaking, []);
 
@@ -131,7 +283,68 @@ export default function InterviewPage({
   }
 
   useEffect(() => {
-    if (!problem || !micSupported || !micOn) return;
+    codeRef.current = code;
+  }, [code]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  // Every couple of minutes, independent of whether anything else prompted a
+  // reply, Alex looks at the editor and decides whether the candidate needs a
+  // nudge — whether they've gone quiet or have been typing down a bad path.
+  useEffect(() => {
+    if (!problem) return;
+    const interval = setInterval(() => {
+      if (busy.current || submissionRef.current || deadlineReachedRef.current) return;
+      const talked = talkedSinceLastCheck.current;
+      const typed = hasMeaningfulChange(codeRef.current, codeAtLastCheck.current);
+      codeAtLastCheck.current = codeRef.current;
+      talkedSinceLastCheck.current = false;
+
+      // An active conversation already gives Alex a channel to react in —
+      // this check-in is only for the stretches where the candidate hasn't
+      // said anything at all.
+      if (talked) return;
+
+      const activity: ActivitySinceLastCheck = typed ? "typing" : "idle";
+      void askInterviewerRef.current({
+        history: messagesRef.current,
+        event: "periodic-check",
+        activity,
+      });
+    }, PERIODIC_CHECK_MS);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [problem?.id]);
+
+  // Ticks off wall-clock time rather than accumulating +1 each interval, so a
+  // throttled background tab still reports the real elapsed time on return.
+  useEffect(() => {
+    const tick = () => setElapsedSeconds(Math.floor((Date.now() - sessionStart.current) / 1000));
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const remainingSeconds =
+    timerConfig.mode === "strict" ? timerConfig.minutes * 60 - elapsedSeconds : null;
+  const timeExpired = remainingSeconds !== null && remainingSeconds <= 0;
+
+  // Close the mic at the deadline, then wait for any run or interviewer reply
+  // already in flight before freezing the completed code and transcript.
+  useEffect(() => {
+    if (!timeExpired) return;
+    deadlineReachedRef.current = true;
+    stopSpeaking();
+    if (autoSubmitted.current || submittingRef.current || busy.current || runningRef.current || partial.trim() || !ownerReady) return;
+    autoSubmitted.current = true;
+    void submitInterview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeExpired, ownerReady, chatBusy, running, partial, submitting]);
+
+  useEffect(() => {
+    if (!problem || !micSupported || !micOn || timeExpired) return;
 
     const stop = startListening({
       onResult: (transcript) => {
@@ -151,12 +364,16 @@ export default function InterviewPage({
       setPartial("");
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [problem?.id, micSupported, micOn]);
+  }, [problem?.id, micSupported, micOn, timeExpired]);
 
   // Re-pointed after every render so a transcript arriving at any moment is
   // sent against the current chat history, not the state captured at start.
   useEffect(() => {
     sendMessageRef.current = (text: string) => void sendMessage(text);
+  });
+
+  useEffect(() => {
+    askInterviewerRef.current = askInterviewer;
   });
 
   useEffect(() => {
@@ -200,8 +417,9 @@ export default function InterviewPage({
     history: ChatTurn[];
     event?: InterviewEvent;
     result?: ExecutionResult | null;
+    activity?: ActivitySinceLastCheck;
   }) {
-    if (busy.current || submissionRef.current) return;
+    if (busy.current || submissionRef.current || deadlineReachedRef.current) return;
     busy.current = true;
     setChatBusy(true);
     // Closed for the whole round trip, not just once his reply starts
@@ -220,8 +438,10 @@ export default function InterviewPage({
           problemId: problem!.id,
           history: options.history,
           code,
+          language,
           testResult: options.result ?? testResult,
           event: options.event,
+          activity: options.activity,
         }),
       });
       const data = (await res.json()) as InterviewReply;
@@ -242,7 +462,10 @@ export default function InterviewPage({
 
   async function sendMessage(overrideText?: string) {
     const text = (overrideText ?? chatInput).trim();
-    if (!text || busy.current || submissionRef.current) return;
+    if (!text || busy.current || submissionRef.current || deadlineReachedRef.current) return;
+    // The candidate has spoken, so the next periodic check should skip its
+    // idle/typing nudge — this conversation turn already covers it.
+    talkedSinceLastCheck.current = true;
     const nextHistory: ChatTurn[] = [...messages, { role: "user", text }];
     setMessages(nextHistory);
     setChatInput("");
@@ -256,8 +479,22 @@ export default function InterviewPage({
     });
   }
 
+  function setCode(next: string) {
+    if (submissionRef.current || deadlineReachedRef.current) return;
+    setDrafts((prev) => ({ ...prev, [language]: next }));
+  }
+
+  function switchLanguage(next: Language) {
+    if (runningRef.current || submittingRef.current || submissionRef.current || deadlineReachedRef.current) return;
+    // Alex hasn't seen the other buffer, but swapping languages isn't itself
+    // progress worth interrupting him for — and the old run no longer applies.
+    reviewedCode.current = drafts[next] ?? "";
+    setTestResult(null);
+    setLanguage(next);
+  }
+
   async function runCode() {
-    if (runningRef.current || submittingRef.current || submissionRef.current) return;
+    if (runningRef.current || submittingRef.current || submissionRef.current || deadlineReachedRef.current) return;
     runningRef.current = true;
     setRunning(true);
     setTestResult(null);
@@ -265,7 +502,7 @@ export default function InterviewPage({
       const res = await fetch("/api/execute", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ problemId: problem!.id, code }),
+        body: JSON.stringify({ problemId: problem!.id, code, language }),
       });
       const data = (await res.json()) as ExecutionResult;
       setTestResult(data);
@@ -280,11 +517,13 @@ export default function InterviewPage({
   async function submitInterview() {
     if (submittingRef.current || busy.current || runningRef.current || partial.trim() || !ownerReady) return;
     submittingRef.current = true;
+    if (deadlineReachedRef.current) autoSubmitted.current = true;
     const snapshot = submissionRef.current ?? {
       id: crypto.randomUUID(),
       problemId: problem!.id,
       history: messages.map(({ role, text }) => ({ role, text })),
       code,
+      language,
       startedAt: startedAtRef.current ?? new Date().toISOString(),
     };
     submissionRef.current = snapshot;
@@ -325,14 +564,37 @@ export default function InterviewPage({
           <span className="font-medium text-sm truncate">{problem.title}</span>
           <DifficultyBadge level={problem.difficulty} />
         </div>
-        <Button
-          variant="danger"
-          size="sm"
-          onClick={submitInterview}
-          disabled={submitting || running || chatBusy || Boolean(partial.trim()) || !ownerReady}
-        >
-          {submitting ? "Submitting…" : submissionLocked ? "Retry Submit" : "End & Submit"}
-        </Button>
+        <div className="flex items-center gap-3">
+          {timerConfig.mode === "strict" ? (
+            <span
+              title="Strict mode: the interview auto-submits when this reaches 0:00."
+              className={`text-xs font-mono px-2.5 py-1 rounded-full border tabular-nums ${
+                remainingSeconds !== null && remainingSeconds <= 60
+                  ? "border-danger text-danger bg-danger-soft animate-pulse-dot"
+                  : remainingSeconds !== null && remainingSeconds <= timerConfig.minutes * 12
+                    ? "border-warning text-warning bg-warning-soft"
+                    : "border-border-strong text-muted"
+              }`}
+            >
+              {formatClock(Math.max(0, remainingSeconds ?? 0))} left
+            </span>
+          ) : (
+            <span
+              title="Free timer: tracks elapsed time with no cutoff."
+              className="text-xs font-mono px-2.5 py-1 rounded-full border border-border-strong text-muted tabular-nums"
+            >
+              {formatClock(elapsedSeconds)} elapsed
+            </span>
+          )}
+          <Button
+            variant="danger"
+            size="sm"
+            onClick={submitInterview}
+            disabled={submitting || running || chatBusy || Boolean(partial.trim()) || !ownerReady}
+          >
+            {submitting ? "Submitting…" : submissionLocked ? "Retry Submit" : "End & Submit"}
+          </Button>
+        </div>
       </header>
 
       {(ownerError || submitError) && (
@@ -377,19 +639,24 @@ export default function InterviewPage({
         {/* Code editor */}
         <section className="flex flex-col rounded-2xl border border-border bg-card overflow-hidden">
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-border">
-            <span className="text-sm font-medium text-muted">Python 3</span>
-            <Button variant="secondary" size="sm" onClick={runCode} disabled={running || submitting || submissionLocked}>
+            <LanguagePicker
+              languages={availableLanguages}
+              value={language}
+              onChange={switchLanguage}
+              disabled={running || submissionLocked || timeExpired}
+            />
+            <Button variant="secondary" size="sm" onClick={runCode} disabled={running || submitting || submissionLocked || timeExpired}>
               {running ? "Running…" : "Run"}
             </Button>
           </div>
           <div className="flex-1 min-h-0">
             <Editor
               height="100%"
-              language="python"
+              language={language}
               theme="vs-dark"
               value={code}
               onChange={(v) => setCode(v ?? "")}
-              options={{ minimap: { enabled: false }, fontSize: 13, readOnly: submissionLocked }}
+              options={{ minimap: { enabled: false }, fontSize: 13, readOnly: submissionLocked || timeExpired }}
             />
           </div>
           {testResult && (
@@ -430,6 +697,14 @@ export default function InterviewPage({
                 />
               </span>
               Alex · AI Interviewer
+              {process.env.NODE_ENV !== "production" && (
+                <span
+                  title="Dev-only: the periodic direction check normally fires every 2 minutes."
+                  className="text-xs font-normal text-muted border border-dashed border-border-strong rounded-full px-2 py-0.5"
+                >
+                  check-in every {PERIODIC_CHECK_MS / 1000}s (dev)
+                </span>
+              )}
               {demoReason && (
                 <span
                   title={
@@ -445,6 +720,7 @@ export default function InterviewPage({
             </span>
             <button
               onClick={toggleVoice}
+              disabled={submissionLocked || timeExpired}
               className="text-xs px-2.5 py-1 rounded-full bg-subtle hover:bg-border-strong transition-colors"
             >
               Voice: {voiceOn ? "On" : "Off"}
@@ -496,7 +772,7 @@ export default function InterviewPage({
             <input
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
-              disabled={submissionLocked}
+              disabled={submissionLocked || timeExpired}
               placeholder={
                 listening
                   ? mutedForSpeaking
@@ -510,7 +786,7 @@ export default function InterviewPage({
               <button
                 type="button"
                 onClick={() => setMicOn((prev) => !prev)}
-                disabled={submissionLocked}
+                disabled={submissionLocked || timeExpired}
                 title={
                   mutedForSpeaking
                     ? "Muted while Alex responds"
@@ -529,7 +805,7 @@ export default function InterviewPage({
                 {!micOn ? "Mic off" : mutedForSpeaking ? "Muted" : "Mic on"}
               </button>
             )}
-            <Button type="submit" size="sm" disabled={chatBusy || submissionLocked || !chatInput.trim()}>
+            <Button type="submit" size="sm" disabled={chatBusy || submissionLocked || timeExpired || !chatInput.trim()}>
               Send
             </Button>
           </form>

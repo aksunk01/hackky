@@ -4,6 +4,15 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { problems, type Problem } from "@/lib/problems";
 import { DifficultyBadge, SiteHeader } from "@/components/ui";
+import {
+  DEFAULT_STRICT_MINUTES,
+  DEV_STRICT_MINUTES,
+  STRICT_DURATION_OPTIONS,
+  timerConfigToQuery,
+  type TimerMode,
+} from "@/lib/timer";
+
+const isDev = process.env.NODE_ENV !== "production";
 
 const DIFFICULTIES: Problem["difficulty"][] = ["Easy", "Medium", "Hard"];
 
@@ -16,6 +25,10 @@ const difficultyChipTone: Record<Problem["difficulty"], string> = {
 export default function ProblemsPage() {
   const [query, setQuery] = useState("");
   const [activeDifficulties, setActiveDifficulties] = useState<Problem["difficulty"][]>([]);
+  const [timerMode, setTimerMode] = useState<TimerMode>("countup");
+  const [strictMinutes, setStrictMinutes] = useState(DEFAULT_STRICT_MINUTES);
+
+  const timerQuery = timerConfigToQuery({ mode: timerMode, minutes: strictMinutes });
 
   function toggleDifficulty(d: Problem["difficulty"]) {
     setActiveDifficulties((prev) =>
@@ -45,6 +58,82 @@ export default function ProblemsPage() {
         <p className="text-muted mb-6">
           {problems.length} problem{problems.length === 1 ? "" : "s"} available — pick one to begin your interview.
         </p>
+
+        <div className="rounded-2xl border border-border bg-card p-4 sm:p-5 mb-6 flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-semibold">Session Timer</span>
+            <span className="text-xs text-muted">
+              {timerMode === "strict"
+                ? `Auto-submits after ${strictMinutes} min`
+                : "Tracks elapsed time — no cutoff"}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setTimerMode("countup")}
+              aria-pressed={timerMode === "countup"}
+              className={`rounded-xl border px-3 py-2.5 text-left transition-colors ${
+                timerMode === "countup"
+                  ? "border-accent bg-accent-soft"
+                  : "border-border-strong hover:bg-subtle"
+              }`}
+            >
+              <div className="text-sm font-medium">Free timer</div>
+              <div className="text-xs text-muted">Stopwatch counts up, no limit</div>
+            </button>
+            <button
+              type="button"
+              onClick={() => setTimerMode("strict")}
+              aria-pressed={timerMode === "strict"}
+              className={`rounded-xl border px-3 py-2.5 text-left transition-colors ${
+                timerMode === "strict"
+                  ? "border-accent bg-accent-soft"
+                  : "border-border-strong hover:bg-subtle"
+              }`}
+            >
+              <div className="text-sm font-medium">Strict time limit</div>
+              <div className="text-xs text-muted">Auto-submits when time runs out</div>
+            </button>
+          </div>
+
+          {timerMode === "strict" && (
+            <div className="flex items-center gap-2 flex-wrap animate-fade-up">
+              <span className="text-xs text-muted uppercase tracking-wide mr-1">Duration</span>
+              {STRICT_DURATION_OPTIONS.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setStrictMinutes(m)}
+                  aria-pressed={strictMinutes === m}
+                  className={`text-xs font-medium rounded-full border px-3 py-1.5 transition-colors ${
+                    strictMinutes === m
+                      ? "border-accent text-accent bg-accent-soft"
+                      : "border-border-strong text-muted hover:text-foreground hover:bg-subtle"
+                  }`}
+                >
+                  {m} min
+                </button>
+              ))}
+              {isDev && (
+                <button
+                  type="button"
+                  onClick={() => setStrictMinutes(DEV_STRICT_MINUTES)}
+                  aria-pressed={strictMinutes === DEV_STRICT_MINUTES}
+                  title="Dev-only: exercise the full countdown and auto-submit in under a minute"
+                  className={`text-xs font-medium rounded-full border border-dashed px-3 py-1.5 transition-colors ${
+                    strictMinutes === DEV_STRICT_MINUTES
+                      ? "border-accent text-accent bg-accent-soft"
+                      : "border-border-strong text-muted hover:text-foreground hover:bg-subtle"
+                  }`}
+                >
+                  {DEV_STRICT_MINUTES} min (dev)
+                </button>
+              )}
+            </div>
+          )}
+        </div>
 
         <div className="flex flex-col gap-3 mb-6">
           <div className="relative">
@@ -108,7 +197,7 @@ export default function ProblemsPage() {
             {filtered.map((p) => (
               <Link
                 key={p.id}
-                href={`/interview/${p.id}`}
+                href={`/interview/${p.id}${timerQuery}`}
                 className="group flex items-center justify-between rounded-2xl border border-border bg-card px-5 py-4 transition-all hover:border-accent hover:shadow-md hover:-translate-y-0.5"
               >
                 <div className="flex flex-col gap-1.5">

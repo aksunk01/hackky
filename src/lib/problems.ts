@@ -1,7 +1,16 @@
+import type { Language } from "./languages";
+
 export type TestCase = {
   args: unknown[];
   expected: unknown;
 };
+
+/**
+ * The shape of a function's inputs and output. Python and JavaScript ignore
+ * this, but the statically typed runners need it to declare each test case's
+ * arguments and to print the return value back as JSON.
+ */
+export type ValueType = "int" | "bool" | "string" | "int[]" | "int[][]";
 
 export type Problem = {
   id: string;
@@ -12,7 +21,14 @@ export type Problem = {
   examples: { input: string; output: string; explanation?: string }[];
   constraints: string[];
   funcName: string;
-  starterCode: string;
+  /**
+   * Every problem has Python (and, mechanically, JavaScript). The statically
+   * typed languages are only wired up where paramTypes/returnType are also
+   * given — until then the picker simply doesn't offer them for that problem.
+   */
+  starterCode: Partial<Record<Language, string>>;
+  paramTypes?: ValueType[];
+  returnType?: ValueType;
   testCases: TestCase[];
 };
 
@@ -34,10 +50,43 @@ export const problems: Problem[] = [
       "Exactly one valid answer exists.",
     ],
     funcName: "two_sum",
-    starterCode: `def two_sum(nums, target):
+    paramTypes: ["int[]", "int"],
+    returnType: "int[]",
+    starterCode: {
+      python: `def two_sum(nums, target):
     # your code here
     pass
 `,
+      javascript: `function two_sum(nums, target) {
+  // your code here
+}
+`,
+      cpp: `vector<int> two_sum(vector<int>& nums, int target) {
+    // your code here
+    return {};
+}
+`,
+      c: `int* two_sum(int* nums, int numsSize, int target, int* returnSize) {
+    // your code here
+    *returnSize = 0;
+    return NULL;
+}
+`,
+      java: `class Solution {
+    public int[] two_sum(int[] nums, int target) {
+        // your code here
+        return new int[0];
+    }
+}
+`,
+      csharp: `public class Solution {
+    public int[] two_sum(int[] nums, int target) {
+        // your code here
+        return new int[0];
+    }
+}
+`,
+    },
     testCases: [
       { args: [[2, 7, 11, 15], 9], expected: [0, 1] },
       { args: [[3, 2, 4], 6], expected: [1, 2] },
@@ -58,10 +107,42 @@ export const problems: Problem[] = [
     ],
     constraints: ["1 <= s.length <= 10^4", "s consists only of bracket characters."],
     funcName: "is_valid",
-    starterCode: `def is_valid(s):
+    paramTypes: ["string"],
+    returnType: "bool",
+    starterCode: {
+      python: `def is_valid(s):
     # your code here
     pass
 `,
+      javascript: `function is_valid(s) {
+  // your code here
+}
+`,
+      cpp: `bool is_valid(string s) {
+    // your code here
+    return false;
+}
+`,
+      c: `bool is_valid(char* s) {
+    // your code here
+    return false;
+}
+`,
+      java: `class Solution {
+    public boolean is_valid(String s) {
+        // your code here
+        return false;
+    }
+}
+`,
+      csharp: `public class Solution {
+    public bool is_valid(string s) {
+        // your code here
+        return false;
+    }
+}
+`,
+    },
     testCases: [
       { args: ["()"], expected: true },
       { args: ["()[]{}"], expected: true },
@@ -86,10 +167,45 @@ export const problems: Problem[] = [
     ],
     constraints: ["1 <= intervals.length <= 10^4", "intervals[i].length == 2"],
     funcName: "merge",
-    starterCode: `def merge(intervals):
+    paramTypes: ["int[][]"],
+    returnType: "int[][]",
+    starterCode: {
+      python: `def merge(intervals):
     # your code here
     pass
 `,
+      javascript: `function merge(intervals) {
+  // your code here
+}
+`,
+      cpp: `vector<vector<int>> merge(vector<vector<int>>& intervals) {
+    // your code here
+    return {};
+}
+`,
+      c: `int** merge(int** intervals, int intervalsSize, int* intervalsColSize,
+            int* returnSize, int** returnColumnSizes) {
+    // your code here
+    *returnSize = 0;
+    *returnColumnSizes = NULL;
+    return NULL;
+}
+`,
+      java: `class Solution {
+    public int[][] merge(int[][] intervals) {
+        // your code here
+        return new int[0][0];
+    }
+}
+`,
+      csharp: `public class Solution {
+    public int[][] merge(int[][] intervals) {
+        // your code here
+        return new int[0][];
+    }
+}
+`,
+    },
     testCases: [
       {
         args: [[[1, 3], [2, 6], [8, 10], [15, 18]]],
@@ -116,10 +232,16 @@ export const problems: Problem[] = [
       "s consists of English letters, digits, symbols, and spaces.",
     ],
     funcName: "length_of_longest_substring",
-    starterCode: `def length_of_longest_substring(s):
+    starterCode: {
+      python: `def length_of_longest_substring(s):
     # your code here
     pass
 `,
+      javascript: `function length_of_longest_substring(s) {
+  // your code here
+}
+`,
+    },
     testCases: [
       { args: ["abcabcbb"], expected: 3 },
       { args: ["bbbbb"], expected: 1 },
@@ -141,10 +263,16 @@ export const problems: Problem[] = [
     ],
     constraints: ["1 <= s.length <= 1000", "s consists of digits and English letters."],
     funcName: "longest_palindrome",
-    starterCode: `def longest_palindrome(s):
+    starterCode: {
+      python: `def longest_palindrome(s):
     # your code here
     pass
 `,
+      javascript: `function longest_palindrome(s) {
+  // your code here
+}
+`,
+    },
     testCases: [
       { args: ["babad"], expected: "bab" },
       { args: ["cbbd"], expected: "bb" },
@@ -171,10 +299,16 @@ export const problems: Problem[] = [
       "strs[i] consists of lowercase English letters.",
     ],
     funcName: "group_anagrams",
-    starterCode: `def group_anagrams(strs):
+    starterCode: {
+      python: `def group_anagrams(strs):
     # your code here
     pass
 `,
+      javascript: `function group_anagrams(strs) {
+  // your code here
+}
+`,
+    },
     testCases: [
       {
         args: [["eat", "tea", "tan", "ate", "nat", "bat"]],
@@ -198,10 +332,16 @@ export const problems: Problem[] = [
     ],
     constraints: ["1 <= s.length, t.length <= 200", "s and t only contain lowercase letters and '#'."],
     funcName: "backspace_compare",
-    starterCode: `def backspace_compare(s, t):
+    starterCode: {
+      python: `def backspace_compare(s, t):
     # your code here
     pass
 `,
+      javascript: `function backspace_compare(s, t) {
+  // your code here
+}
+`,
+    },
     testCases: [
       { args: ["ab#c", "ad#c"], expected: true },
       { args: ["ab##", "c#d#"], expected: true },
@@ -222,10 +362,16 @@ export const problems: Problem[] = [
     ],
     constraints: ["1 <= prices.length <= 10^5", "0 <= prices[i] <= 10^4"],
     funcName: "max_profit",
-    starterCode: `def max_profit(prices):
+    starterCode: {
+      python: `def max_profit(prices):
     # your code here
     pass
 `,
+      javascript: `function max_profit(prices) {
+  // your code here
+}
+`,
+    },
     testCases: [
       { args: [[7, 1, 5, 3, 6, 4]], expected: 5 },
       { args: [[7, 6, 4, 3, 1]], expected: 0 },
@@ -246,10 +392,16 @@ export const problems: Problem[] = [
     ],
     constraints: ["n == gas.length == cost.length", "1 <= n <= 10^5", "0 <= gas[i], cost[i] <= 10^4"],
     funcName: "can_complete_circuit",
-    starterCode: `def can_complete_circuit(gas, cost):
+    starterCode: {
+      python: `def can_complete_circuit(gas, cost):
     # your code here
     pass
 `,
+      javascript: `function can_complete_circuit(gas, cost) {
+  // your code here
+}
+`,
+    },
     testCases: [
       { args: [[1, 2, 3, 4, 5], [3, 4, 5, 1, 2]], expected: 3 },
       { args: [[2, 3, 4], [3, 4, 3]], expected: -1 },
@@ -271,10 +423,16 @@ export const problems: Problem[] = [
     ],
     constraints: ["2 <= arr.length <= 10^5", "-10^6 <= arr[i] <= 10^6", "All elements are distinct."],
     funcName: "minimum_abs_difference",
-    starterCode: `def minimum_abs_difference(arr):
+    starterCode: {
+      python: `def minimum_abs_difference(arr):
     # your code here
     pass
 `,
+      javascript: `function minimum_abs_difference(arr) {
+  // your code here
+}
+`,
+    },
     testCases: [
       { args: [[4, 2, 1, 3]], expected: [[1, 2], [2, 3], [3, 4]] },
       { args: [[1, 3, 6, 10, 15]], expected: [[1, 3]] },
@@ -300,10 +458,16 @@ export const problems: Problem[] = [
     ],
     constraints: ["1 <= m, n <= 300", "grid[i][j] is '0' or '1'."],
     funcName: "num_islands",
-    starterCode: `def num_islands(grid):
+    starterCode: {
+      python: `def num_islands(grid):
     # your code here
     pass
 `,
+      javascript: `function num_islands(grid) {
+  // your code here
+}
+`,
+    },
     testCases: [
       {
         args: [[["1", "1", "1", "1", "0"], ["1", "1", "0", "1", "0"], ["1", "1", "0", "0", "0"], ["0", "0", "0", "0", "0"]]],
@@ -327,10 +491,16 @@ export const problems: Problem[] = [
     ],
     constraints: ["1 <= m, n <= 50", "0 <= image[i][j], color < 65536", "0 <= sr < m", "0 <= sc < n"],
     funcName: "flood_fill",
-    starterCode: `def flood_fill(image, sr, sc, color):
+    starterCode: {
+      python: `def flood_fill(image, sr, sc, color):
     # your code here
     pass
 `,
+      javascript: `function flood_fill(image, sr, sc, color) {
+  // your code here
+}
+`,
+    },
     testCases: [
       { args: [[[1, 1, 1], [1, 1, 0], [1, 0, 1]], 1, 1, 2], expected: [[2, 2, 2], [2, 2, 0], [2, 0, 1]] },
       { args: [[[0, 0, 0], [0, 0, 0]], 0, 0, 0], expected: [[0, 0, 0], [0, 0, 0]] },
@@ -349,10 +519,16 @@ export const problems: Problem[] = [
     ],
     constraints: ["1 <= arr.length <= 10^5", "-10^4 <= arr[i] <= 10^4"],
     funcName: "prefix_sum",
-    starterCode: `def prefix_sum(arr):
+    starterCode: {
+      python: `def prefix_sum(arr):
     # your code here
     pass
 `,
+      javascript: `function prefix_sum(arr) {
+  // your code here
+}
+`,
+    },
     testCases: [
       { args: [[1, 2, 3, 4]], expected: [1, 3, 6, 10] },
       { args: [[5]], expected: [5] },
@@ -373,10 +549,16 @@ export const problems: Problem[] = [
     ],
     constraints: ["1 <= nums.length <= 10^5", "-10^9 <= nums[i] <= 10^9"],
     funcName: "next_greater_elements",
-    starterCode: `def next_greater_elements(nums):
+    starterCode: {
+      python: `def next_greater_elements(nums):
     # your code here
     pass
 `,
+      javascript: `function next_greater_elements(nums) {
+  // your code here
+}
+`,
+    },
     testCases: [
       { args: [[4, 5, 2, 25]], expected: [5, 25, 25, -1] },
       { args: [[13, 7, 6, 12]], expected: [-1, 12, 12, -1] },
@@ -401,10 +583,16 @@ export const problems: Problem[] = [
       "1 <= capacity <= 10^5",
     ],
     funcName: "car_pooling",
-    starterCode: `def car_pooling(trips, capacity):
+    starterCode: {
+      python: `def car_pooling(trips, capacity):
     # your code here
     pass
 `,
+      javascript: `function car_pooling(trips, capacity) {
+  // your code here
+}
+`,
+    },
     testCases: [
       { args: [[[2, 1, 5], [3, 3, 7]], 4], expected: false },
       { args: [[[2, 1, 5], [3, 3, 7]], 5], expected: true },
@@ -424,10 +612,16 @@ export const problems: Problem[] = [
     ],
     constraints: ["1 <= nums.length <= 1000", "-10^9 <= nums[i] <= 10^9"],
     funcName: "sub_array_ranges",
-    starterCode: `def sub_array_ranges(nums):
+    starterCode: {
+      python: `def sub_array_ranges(nums):
     # your code here
     pass
 `,
+      javascript: `function sub_array_ranges(nums) {
+  // your code here
+}
+`,
+    },
     testCases: [
       { args: [[1, 2, 3]], expected: 4 },
       { args: [[4, -2, -3, 4, 1]], expected: 59 },
@@ -447,10 +641,16 @@ export const problems: Problem[] = [
     ],
     constraints: ["1 <= days.length <= 10^5", "0 <= h <= days.length"],
     funcName: "longest_holiday_subarray",
-    starterCode: `def longest_holiday_subarray(days, h):
+    starterCode: {
+      python: `def longest_holiday_subarray(days, h):
     # your code here
     pass
 `,
+      javascript: `function longest_holiday_subarray(days, h) {
+  // your code here
+}
+`,
+    },
     testCases: [
       { args: [["w", "w", "h", "h", "w", "w", "h", "h", "w", "w"], 2], expected: 6 },
       { args: [["h", "h", "w", "w", "w", "h", "h", "h", "w", "w"], 1], expected: 4 },
@@ -475,10 +675,16 @@ export const problems: Problem[] = [
       "s consists of integers and the operators '+','-','*','/' with spaces.",
     ],
     funcName: "calculate",
-    starterCode: `def calculate(s):
+    starterCode: {
+      python: `def calculate(s):
     # your code here
     pass
 `,
+      javascript: `function calculate(s) {
+  // your code here
+}
+`,
+    },
     testCases: [
       { args: ["3+2*2"], expected: 7 },
       { args: [" 3/2 "], expected: 1 },
@@ -502,10 +708,16 @@ export const problems: Problem[] = [
       "1 <= minSize <= maxSize <= min(26, s.length)",
     ],
     funcName: "max_freq",
-    starterCode: `def max_freq(s, maxLetters, minSize, maxSize):
+    starterCode: {
+      python: `def max_freq(s, maxLetters, minSize, maxSize):
     # your code here
     pass
 `,
+      javascript: `function max_freq(s, maxLetters, minSize, maxSize) {
+  // your code here
+}
+`,
+    },
     testCases: [
       { args: ["aababcaab", 2, 3, 4], expected: 2 },
       { args: ["aaaa", 1, 3, 3], expected: 2 },
@@ -524,10 +736,16 @@ export const problems: Problem[] = [
     ],
     constraints: ["1 <= s.length <= 10^5", "s consists only of 'H' and 'T'."],
     funcName: "min_flips",
-    starterCode: `def min_flips(s):
+    starterCode: {
+      python: `def min_flips(s):
     # your code here
     pass
 `,
+      javascript: `function min_flips(s) {
+  // your code here
+}
+`,
+    },
     testCases: [
       { args: ["HTTHHT"], expected: 2 },
       { args: ["HHTTHH"], expected: 2 },
@@ -548,10 +766,16 @@ export const problems: Problem[] = [
     ],
     constraints: ["0 <= a.length, b.length <= 10^5", "-10^9 <= a[i], b[i] <= 10^9"],
     funcName: "merge_sorted_arrays",
-    starterCode: `def merge_sorted_arrays(a, b):
+    starterCode: {
+      python: `def merge_sorted_arrays(a, b):
     # your code here
     pass
 `,
+      javascript: `function merge_sorted_arrays(a, b) {
+  // your code here
+}
+`,
+    },
     testCases: [
       { args: [[1, 3, 5], [2, 4, 6]], expected: [1, 2, 3, 4, 5, 6] },
       { args: [[], [1]], expected: [1] },
@@ -572,10 +796,16 @@ export const problems: Problem[] = [
     ],
     constraints: ["1 <= words.length <= 100", "words[i] consists of lowercase English letters."],
     funcName: "alien_order",
-    starterCode: `def alien_order(words):
+    starterCode: {
+      python: `def alien_order(words):
     # your code here
     pass
 `,
+      javascript: `function alien_order(words) {
+  // your code here
+}
+`,
+    },
     testCases: [
       { args: [["wrt", "wrf", "er", "ett", "rftt"]], expected: "wertf" },
       { args: [["z", "x"]], expected: "zx" },
