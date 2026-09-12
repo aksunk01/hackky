@@ -2,6 +2,7 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Problem, ValueType } from "../problems";
 import {
+  CASE_MARKER,
   COMPILE_TIMEOUT_MS,
   EXEC_OPTIONS,
   type ExecutionResult,
@@ -9,37 +10,36 @@ import {
   crashedResult,
   errorText,
   execFileAsync,
-  parseRawResults,
   requireTypes,
-  toExecutionResult,
+  runHarness,
   withTempDir,
 } from "./common";
 
-const EMITTERS = `    static void EmitStr(string s) {
-        var sb = new StringBuilder();
-        sb.Append('"');
+const EMITTERS = `    // Results are buffered so the candidate's own prints can't interleave with them.
+    static readonly StringBuilder Out = new StringBuilder();
+    static void EmitStr(string s) {
+        Out.Append('"');
         foreach (char c in s) {
-            if (c == '"' || c == '\\\\') sb.Append('\\\\').Append(c);
-            else sb.Append(c);
+            if (c == '"' || c == '\\\\') Out.Append('\\\\').Append(c);
+            else Out.Append(c);
         }
-        sb.Append('"');
-        Console.Write(sb.ToString());
+        Out.Append('"');
     }
-    static void EmitBool(bool v) { Console.Write(v ? "true" : "false"); }
+    static void EmitBool(bool v) { Out.Append(v ? "true" : "false"); }
     static void EmitIntArray(int[] v) {
-        Console.Write("[");
-        for (int i = 0; i < v.Length; i++) { if (i > 0) Console.Write(","); Console.Write(v[i]); }
-        Console.Write("]");
+        Out.Append("[");
+        for (int i = 0; i < v.Length; i++) { if (i > 0) Out.Append(","); Out.Append(v[i]); }
+        Out.Append("]");
     }
     static void EmitIntMatrix(int[][] v) {
-        Console.Write("[");
-        for (int i = 0; i < v.Length; i++) { if (i > 0) Console.Write(","); EmitIntArray(v[i]); }
-        Console.Write("]");
+        Out.Append("[");
+        for (int i = 0; i < v.Length; i++) { if (i > 0) Out.Append(","); EmitIntArray(v[i]); }
+        Out.Append("]");
     }
-    static void Open() { Console.Write("{\\"actual\\":"); }
-    static void Ok() { Console.Write(",\\"error\\":null}"); }
-    static void FailStart() { Console.Write("{\\"actual\\":null,\\"error\\":"); }
-    static void FailEnd() { Console.Write("}"); }
+    static void Open() { Out.Append("{\\"actual\\":"); }
+    static void Ok() { Out.Append(",\\"error\\":null}"); }
+    static void FailStart() { Out.Append("{\\"actual\\":null,\\"error\\":"); }
+    static void FailEnd() { Out.Append("}"); }
 `;
 
 function csharpType(type: ValueType): string {
@@ -75,7 +75,7 @@ function csharpLiteral(type: ValueType, value: unknown): string {
 function emitCall(type: ValueType): string {
   switch (type) {
     case "int":
-      return "Console.Write(_r);";
+      return "Out.Append(_r);";
     case "bool":
       return "EmitBool(_r);";
     case "string":
@@ -96,7 +96,8 @@ function buildHarness(problem: TypedProblem): string {
       )
       .join("\n");
     const callArgs = testCase.args.map((_, j) => `_a${j}`).join(", ");
-    return `        ${i > 0 ? 'Console.Write(",");\n        ' : ""}{
+    return `        ${i > 0 ? 'Out.Append(",");\n        ' : ""}Console.Write("\\n${CASE_MARKER}\\n");
+        {
 ${decls}
             try {
                 ${csharpType(problem.returnType)} _r = sol.${problem.funcName}(${callArgs});
@@ -116,9 +117,11 @@ public static class Program {
 ${EMITTERS}
     public static void Main() {
         var sol = new Solution();
-        Console.Write("[");
+        Out.Append("[");
 ${blocks.join("\n")}
-        Console.WriteLine("]");
+        Out.Append("]");
+        Console.WriteLine();
+        Console.WriteLine(Out.ToString());
     }
 }
 `;
@@ -178,15 +181,6 @@ export async function runCSharp(
       return crashedResult(problem, errorText(err));
     }
 
-    try {
-      const { stdout } = await execFileAsync(
-        path.join(dir, "out", "solution"),
-        [],
-        EXEC_OPTIONS
-      );
-      return toExecutionResult(problem, parseRawResults(stdout));
-    } catch (err) {
-      return crashedResult(problem, errorText(err));
-    }
+    return runHarness(problem, path.join(dir, "out", "solution"), []);
   });
 }

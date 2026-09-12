@@ -7,6 +7,7 @@ import { getProblem } from "@/lib/problems";
 import type { ExecutionResult } from "@/lib/execute";
 import { LANGUAGES, type Language } from "@/lib/languages";
 import { Button, DifficultyBadge, Logo } from "@/components/ui";
+import { RunResultPanel } from "@/components/run-result";
 import { formatClock, timerConfigFromSearch, type TimerConfig } from "@/lib/timer";
 import { looksRandom } from "@/lib/noise";
 import {
@@ -687,30 +688,7 @@ export default function InterviewPage({
               options={{ minimap: { enabled: false }, fontSize: 13, readOnly: submissionLocked || timeExpired }}
             />
           </div>
-          {testResult && (
-            <div className="border-t border-border p-3 max-h-40 overflow-y-auto text-xs font-mono bg-subtle">
-              {testResult.crashed ? (
-                <pre className="text-danger whitespace-pre-wrap">{testResult.crashOutput}</pre>
-              ) : (
-                <>
-                  <div
-                    className={`mb-2 font-semibold ${
-                      testResult.passed === testResult.total ? "text-success" : "text-foreground"
-                    }`}
-                  >
-                    {testResult.passed}/{testResult.total} test cases passed
-                  </div>
-                  {testResult.results.map((r, i) => (
-                    <div key={i} className={r.passed ? "text-success" : "text-danger"}>
-                      {r.passed ? "✓" : "✗"} input={JSON.stringify(r.args)} expected={JSON.stringify(r.expected)}{" "}
-                      got={JSON.stringify(r.actual)}
-                      {r.error ? ` (${r.error})` : ""}
-                    </div>
-                  ))}
-                </>
-              )}
-            </div>
-          )}
+          {testResult && <RunResultPanel result={testResult} problem={problem!} />}
         </section>
 
         {/* Chat with AI interviewer */}

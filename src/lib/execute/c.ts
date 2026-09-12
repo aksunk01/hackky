@@ -2,6 +2,7 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Problem, ValueType } from "../problems";
 import {
+  CASE_MARKER,
   COMPILE_TIMEOUT_MS,
   EXEC_OPTIONS,
   type ExecutionResult,
@@ -9,9 +10,8 @@ import {
   crashedResult,
   errorText,
   execFileAsync,
-  parseRawResults,
   requireTypes,
-  toExecutionResult,
+  runHarness,
   withTempDir,
 } from "./common";
 
@@ -22,28 +22,30 @@ const PRELUDE = `#include <stdio.h>
 #include <limits.h>
 `;
 
-const EMITTERS = `static void _emitStr(const char* s) {
-    putchar('"');
+const EMITTERS = `// Results are written to a scratch file so the candidate's own prints can't interleave with them.
+static FILE* _res;
+static void _emitStr(const char* s) {
+    fputc('"', _res);
     for (; *s; s++) {
-        if (*s == '"' || *s == '\\\\') { putchar('\\\\'); putchar(*s); }
-        else putchar(*s);
+        if (*s == '"' || *s == '\\\\') { fputc('\\\\', _res); fputc(*s, _res); }
+        else fputc(*s, _res);
     }
-    putchar('"');
+    fputc('"', _res);
 }
-static void _emitInt(int v) { printf("%d", v); }
-static void _emitBool(bool v) { printf(v ? "true" : "false"); }
+static void _emitInt(int v) { fprintf(_res, "%d", v); }
+static void _emitBool(bool v) { fprintf(_res, v ? "true" : "false"); }
 static void _emitIntArray(int* v, int n) {
-    putchar('[');
-    for (int i = 0; i < n; i++) { if (i) putchar(','); printf("%d", v[i]); }
-    putchar(']');
+    fputc('[', _res);
+    for (int i = 0; i < n; i++) { if (i) fputc(',', _res); fprintf(_res, "%d", v[i]); }
+    fputc(']', _res);
 }
 static void _emitIntMatrix(int** v, int n, int* cols) {
-    putchar('[');
-    for (int i = 0; i < n; i++) { if (i) putchar(','); _emitIntArray(v[i], cols[i]); }
-    putchar(']');
+    fputc('[', _res);
+    for (int i = 0; i < n; i++) { if (i) fputc(',', _res); _emitIntArray(v[i], cols[i]); }
+    fputc(']', _res);
 }
-static void _open(void) { printf("{\\"actual\\":"); }
-static void _ok(void) { printf(",\\"error\\":null}"); }
+static void _open(void) { fprintf(_res, "{\\"actual\\":"); }
+static void _ok(void) { fprintf(_res, ",\\"error\\":null}"); }
 `;
 
 /**
@@ -125,7 +127,8 @@ function buildHarness(problem: TypedProblem, candidateCode: string): string {
     );
     const decls = declared.map((d) => `        ${d.decl}`).join("\n");
     const callArgs = declared.flatMap((d) => d.args);
-    return `    ${i > 0 ? "putchar(',');\n    " : ""}{
+    return `    ${i > 0 ? "fputc(',', _res);\n    " : ""}fputs("\\n${CASE_MARKER}\\n", stdout);
+    {
 ${decls}
         ${callAndEmit(problem, callArgs)}
     }`;
@@ -136,9 +139,14 @@ ${candidateCode}
 
 ${EMITTERS}
 int main(void) {
-    putchar('[');
+    _res = tmpfile();
+    fputc('[', _res);
 ${blocks.join("\n")}
-    printf("]\\n");
+    fputc(']', _res);
+    rewind(_res);
+    putchar('\\n');
+    for (int c; (c = fgetc(_res)) != EOF;) putchar(c);
+    putchar('\\n');
     return 0;
 }
 `;
@@ -165,11 +173,6 @@ export async function runC(
       return crashedResult(problem, errorText(err));
     }
 
-    try {
-      const { stdout } = await execFileAsync(binary, [], EXEC_OPTIONS);
-      return toExecutionResult(problem, parseRawResults(stdout));
-    } catch (err) {
-      return crashedResult(problem, errorText(err));
-    }
+    return runHarness(problem, binary, []);
   });
 }

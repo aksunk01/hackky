@@ -2,6 +2,7 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Problem, ValueType } from "../problems";
 import {
+  CASE_MARKER,
   COMPILE_TIMEOUT_MS,
   EXEC_OPTIONS,
   type ExecutionResult,
@@ -9,38 +10,37 @@ import {
   crashedResult,
   errorText,
   execFileAsync,
-  parseRawResults,
   requireTypes,
-  toExecutionResult,
+  runHarness,
   withTempDir,
 } from "./common";
 
-const EMITTERS = `    static void emitStr(String s) {
-        StringBuilder sb = new StringBuilder();
-        sb.append('"');
+const EMITTERS = `    // Results are buffered so the candidate's own prints can't interleave with them.
+    static final StringBuilder out = new StringBuilder();
+    static void emitStr(String s) {
+        out.append('"');
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);
-            if (c == '"' || c == '\\\\') sb.append('\\\\').append(c);
-            else sb.append(c);
+            if (c == '"' || c == '\\\\') out.append('\\\\').append(c);
+            else out.append(c);
         }
-        sb.append('"');
-        System.out.print(sb);
+        out.append('"');
     }
-    static void emitBool(boolean v) { System.out.print(v ? "true" : "false"); }
+    static void emitBool(boolean v) { out.append(v ? "true" : "false"); }
     static void emitIntArray(int[] v) {
-        System.out.print("[");
-        for (int i = 0; i < v.length; i++) { if (i > 0) System.out.print(","); System.out.print(v[i]); }
-        System.out.print("]");
+        out.append("[");
+        for (int i = 0; i < v.length; i++) { if (i > 0) out.append(","); out.append(v[i]); }
+        out.append("]");
     }
     static void emitIntMatrix(int[][] v) {
-        System.out.print("[");
-        for (int i = 0; i < v.length; i++) { if (i > 0) System.out.print(","); emitIntArray(v[i]); }
-        System.out.print("]");
+        out.append("[");
+        for (int i = 0; i < v.length; i++) { if (i > 0) out.append(","); emitIntArray(v[i]); }
+        out.append("]");
     }
-    static void open() { System.out.print("{\\"actual\\":"); }
-    static void ok() { System.out.print(",\\"error\\":null}"); }
-    static void failStart() { System.out.print("{\\"actual\\":null,\\"error\\":"); }
-    static void failEnd() { System.out.print("}"); }
+    static void open() { out.append("{\\"actual\\":"); }
+    static void ok() { out.append(",\\"error\\":null}"); }
+    static void failStart() { out.append("{\\"actual\\":null,\\"error\\":"); }
+    static void failEnd() { out.append("}"); }
 `;
 
 function javaType(type: ValueType): string {
@@ -76,7 +76,7 @@ function javaLiteral(type: ValueType, value: unknown): string {
 function emitCall(type: ValueType): string {
   switch (type) {
     case "int":
-      return "System.out.print(_r);";
+      return "out.append(_r);";
     case "bool":
       return "emitBool(_r);";
     case "string":
@@ -97,7 +97,8 @@ function buildHarness(problem: TypedProblem): string {
       )
       .join("\n");
     const callArgs = testCase.args.map((_, j) => `_a${j}`).join(", ");
-    return `        ${i > 0 ? 'System.out.print(",");\n        ' : ""}{
+    return `        ${i > 0 ? 'out.append(",");\n        ' : ""}System.out.print("\\n${CASE_MARKER}\\n");
+        {
 ${decls}
             try {
                 ${javaType(problem.returnType)} _r = sol.${problem.funcName}(${callArgs});
@@ -114,9 +115,11 @@ public class Main {
 ${EMITTERS}
     public static void main(String[] args) {
         Solution sol = new Solution();
-        System.out.print("[");
+        out.append("[");
 ${blocks.join("\n")}
-        System.out.println("]");
+        out.append("]");
+        System.out.println();
+        System.out.println(out);
     }
 }
 `;
@@ -144,11 +147,6 @@ export async function runJava(
       return crashedResult(problem, errorText(err));
     }
 
-    try {
-      const { stdout } = await execFileAsync("java", ["-cp", classes, "Main"], EXEC_OPTIONS);
-      return toExecutionResult(problem, parseRawResults(stdout));
-    } catch (err) {
-      return crashedResult(problem, errorText(err));
-    }
+    return runHarness(problem, "java", ["-cp", classes, "Main"]);
   });
 }

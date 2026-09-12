@@ -814,6 +814,20 @@ export const problems: Problem[] = [
   },
 ];
 
+/**
+ * The argument names as the candidate sees them, read off the Python starter's
+ * signature since every problem has one (`def two_sum(nums, target):`).
+ */
+export function paramNames(problem: Problem): string[] {
+  const match = /def\s+\w+\s*\(([^)]*)\)/.exec(problem.starterCode.python ?? "");
+  const names = (match?.[1] ?? "")
+    .split(",")
+    .map((part) => part.trim().split(/[:=]/)[0]!.trim())
+    .filter(Boolean);
+  const count = problem.testCases[0]?.args.length ?? names.length;
+  return Array.from({ length: count }, (_, i) => names[i] ?? `arg${i + 1}`);
+}
+
 export function getProblem(id: string): Problem | undefined {
   return problems.find((p) => p.id === id);
 }

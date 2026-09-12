@@ -2,6 +2,7 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Problem, ValueType } from "../problems";
 import {
+  CASE_MARKER,
   COMPILE_TIMEOUT_MS,
   EXEC_OPTIONS,
   type ExecutionResult,
@@ -9,13 +10,13 @@ import {
   crashedResult,
   errorText,
   execFileAsync,
-  parseRawResults,
   requireTypes,
-  toExecutionResult,
+  runHarness,
   withTempDir,
 } from "./common";
 
 const PRELUDE = `#include <cstdio>
+#include <iostream>
 #include <string>
 #include <vector>
 #include <algorithm>
@@ -32,31 +33,33 @@ using namespace std;
 `;
 
 /** Prints each result as the {"actual":…,"error":…} object the runner expects. */
-const EMITTERS = `static void _emitStr(const string& s) {
-    putchar('"');
+const EMITTERS = `// Results are written to a scratch file so the candidate's own prints can't interleave with them.
+static FILE* _res;
+static void _emitStr(const string& s) {
+    fputc('"', _res);
     for (char c : s) {
-        if (c == '"' || c == '\\\\') { putchar('\\\\'); putchar(c); }
-        else putchar(c);
+        if (c == '"' || c == '\\\\') { fputc('\\\\', _res); fputc(c, _res); }
+        else fputc(c, _res);
     }
-    putchar('"');
+    fputc('"', _res);
 }
-static void _emit(int v) { printf("%d", v); }
-static void _emit(bool v) { printf(v ? "true" : "false"); }
+static void _emit(int v) { fprintf(_res, "%d", v); }
+static void _emit(bool v) { fprintf(_res, v ? "true" : "false"); }
 static void _emit(const string& v) { _emitStr(v); }
 static void _emit(const vector<int>& v) {
-    putchar('[');
-    for (size_t i = 0; i < v.size(); i++) { if (i) putchar(','); printf("%d", v[i]); }
-    putchar(']');
+    fputc('[', _res);
+    for (size_t i = 0; i < v.size(); i++) { if (i) fputc(',', _res); fprintf(_res, "%d", v[i]); }
+    fputc(']', _res);
 }
 static void _emit(const vector<vector<int>>& v) {
-    putchar('[');
-    for (size_t i = 0; i < v.size(); i++) { if (i) putchar(','); _emit(v[i]); }
-    putchar(']');
+    fputc('[', _res);
+    for (size_t i = 0; i < v.size(); i++) { if (i) fputc(',', _res); _emit(v[i]); }
+    fputc(']', _res);
 }
-static void _open() { printf("{\\"actual\\":"); }
-static void _ok() { printf(",\\"error\\":null}"); }
-static void _failStart() { printf("{\\"actual\\":null,\\"error\\":"); }
-static void _failEnd() { printf("}"); }
+static void _open() { fprintf(_res, "{\\"actual\\":"); }
+static void _ok() { fprintf(_res, ",\\"error\\":null}"); }
+static void _failStart() { fprintf(_res, "{\\"actual\\":null,\\"error\\":"); }
+static void _failEnd() { fprintf(_res, "}"); }
 `;
 
 function cppType(type: ValueType): string {
@@ -98,7 +101,8 @@ function buildHarness(problem: TypedProblem, candidateCode: string): string {
       )
       .join("\n");
     const callArgs = testCase.args.map((_, j) => `_a${j}`).join(", ");
-    return `    ${i > 0 ? "putchar(',');\n    " : ""}{
+    return `    ${i > 0 ? "fputc(',', _res);\n    " : ""}fputs("\\n${CASE_MARKER}\\n", stdout);
+    {
 ${decls}
         try {
             ${cppType(problem.returnType)} _r = ${problem.funcName}(${callArgs});
@@ -116,9 +120,14 @@ ${candidateCode}
 
 ${EMITTERS}
 int main() {
-    putchar('[');
+    _res = tmpfile();
+    fputc('[', _res);
 ${blocks.join("\n")}
-    printf("]\\n");
+    fputc(']', _res);
+    rewind(_res);
+    putchar('\\n');
+    for (int c; (c = fgetc(_res)) != EOF;) putchar(c);
+    putchar('\\n');
     return 0;
 }
 `;
@@ -145,11 +154,6 @@ export async function runCpp(
       return crashedResult(problem, errorText(err));
     }
 
-    try {
-      const { stdout } = await execFileAsync(binary, [], EXEC_OPTIONS);
-      return toExecutionResult(problem, parseRawResults(stdout));
-    } catch (err) {
-      return crashedResult(problem, errorText(err));
-    }
+    return runHarness(problem, binary, []);
   });
 }
