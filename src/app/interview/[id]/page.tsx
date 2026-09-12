@@ -20,7 +20,10 @@ import {
 type ChatTurn = { role: "user" | "model"; text: string };
 
 /** What the candidate did in the editor, when it wasn't them talking. */
-type InterviewEvent = "run" | "code-review";
+type InterviewEvent = "run" | "code-review" | "periodic-check";
+
+/** Whether the candidate was writing code or doing nothing during a periodic check's window. */
+type ActivitySinceLastCheck = "idle" | "typing";
 
 type InterviewReply = {
   reply: string | null;
@@ -32,6 +35,12 @@ type InterviewReply = {
 const IDLE_REVIEW_MS = 12_000;
 /** Non-whitespace characters of change worth a comment. */
 const MIN_CODE_DELTA = 15;
+/**
+ * How often Alex checks in on direction, independent of the quick idle review
+ * above. Cut to 20s outside production so the behavior can be exercised
+ * without sitting through the real 2-minute cadence.
+ */
+const PERIODIC_CHECK_MS = process.env.NODE_ENV === "production" ? 2 * 60_000 : 20_000;
 
 function noSubscription() {
   return () => {};
@@ -112,8 +121,60 @@ export default function InterviewPage({
   // The listener is started once and outlives many renders, so its callback has
   // to reach the current sendMessage rather than the one captured at start.
   const sendMessageRef = useRef<(text: string) => void>(() => {});
+  // The periodic direction check runs off a fixed interval rather than a
+  // render, so it reads these refs instead of the state captured at mount.
+  const codeRef = useRef(code);
+  const messagesRef = useRef(messages);
+  const codeAtLastCheck = useRef(problem?.starterCode ?? "");
+  const talkedSinceLastCheck = useRef(false);
+  // Same reason as sendMessageRef: the interval below is set up once, but
+  // askInterviewer closes over whichever code/messages were current the
+  // render it was defined in, so the interval must call through a ref that's
+  // re-pointed every render instead of the closure it captured at mount.
+  const askInterviewerRef = useRef<(options: {
+    history: ChatTurn[];
+    event?: InterviewEvent;
+    result?: ExecutionResult | null;
+    activity?: ActivitySinceLastCheck;
+  }) => Promise<void>>(async () => {});
 
   useEffect(() => stopSpeaking, []);
+
+  useEffect(() => {
+    codeRef.current = code;
+  }, [code]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  // Every couple of minutes, independent of whether anything else prompted a
+  // reply, Alex looks at the editor and decides whether the candidate needs a
+  // nudge — whether they've gone quiet or have been typing down a bad path.
+  useEffect(() => {
+    if (!problem) return;
+    const interval = setInterval(() => {
+      if (busy.current) return; // retained for the next tick rather than lost
+      const talked = talkedSinceLastCheck.current;
+      const typed = hasMeaningfulChange(codeRef.current, codeAtLastCheck.current);
+      codeAtLastCheck.current = codeRef.current;
+      talkedSinceLastCheck.current = false;
+
+      // An active conversation already gives Alex a channel to react in —
+      // this check-in is only for the stretches where the candidate hasn't
+      // said anything at all.
+      if (talked) return;
+
+      const activity: ActivitySinceLastCheck = typed ? "typing" : "idle";
+      void askInterviewerRef.current({
+        history: messagesRef.current,
+        event: "periodic-check",
+        activity,
+      });
+    }, PERIODIC_CHECK_MS);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [problem?.id]);
 
   // Ticks off wall-clock time rather than accumulating +1 each interval, so a
   // throttled background tab still reports the real elapsed time on return.
@@ -167,6 +228,10 @@ export default function InterviewPage({
   });
 
   useEffect(() => {
+    askInterviewerRef.current = askInterviewer;
+  });
+
+  useEffect(() => {
     if (!problem || greeted.current) return;
     greeted.current = true;
     void askInterviewer({ history: [] });
@@ -207,6 +272,7 @@ export default function InterviewPage({
     history: ChatTurn[];
     event?: InterviewEvent;
     result?: ExecutionResult | null;
+    activity?: ActivitySinceLastCheck;
   }) {
     if (busy.current) return;
     busy.current = true;
@@ -229,6 +295,7 @@ export default function InterviewPage({
           code,
           testResult: options.result ?? testResult,
           event: options.event,
+          activity: options.activity,
         }),
       });
       const data = (await res.json()) as InterviewReply;
@@ -250,6 +317,9 @@ export default function InterviewPage({
   async function sendMessage(overrideText?: string) {
     const text = (overrideText ?? chatInput).trim();
     if (!text || busy.current) return;
+    // The candidate has spoken, so the next periodic check should skip its
+    // idle/typing nudge — this conversation turn already covers it.
+    talkedSinceLastCheck.current = true;
     const nextHistory: ChatTurn[] = [...messages, { role: "user", text }];
     setMessages(nextHistory);
     setChatInput("");
@@ -425,6 +495,14 @@ export default function InterviewPage({
                 />
               </span>
               Alex · AI Interviewer
+              {process.env.NODE_ENV !== "production" && (
+                <span
+                  title="Dev-only: the periodic direction check normally fires every 2 minutes."
+                  className="text-xs font-normal text-muted border border-dashed border-border-strong rounded-full px-2 py-0.5"
+                >
+                  check-in every {PERIODIC_CHECK_MS / 1000}s (dev)
+                </span>
+              )}
               {demoReason && (
                 <span
                   title={

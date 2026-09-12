@@ -49,7 +49,22 @@ function looksRandom(text: string): boolean {
 }
 
 /** What the candidate did in the editor, when it wasn't them talking. */
-type InterviewEvent = "run" | "code-review";
+type InterviewEvent = "run" | "code-review" | "periodic-check";
+
+/** Whether the candidate was writing code or doing nothing during a periodic check's window. */
+type ActivitySinceLastCheck = "idle" | "typing";
+
+/** The model's way of saying a periodic check found nothing worth interrupting for. */
+const NO_COMMENT = "NONE";
+
+/** Visible tag so a periodic direction-check message is obviously not a normal reply. */
+const CHECK_IN_LABEL = "🧭 [2-min check-in] ";
+
+/** Scripted fallback used when a periodic check can't reach Gemini, so the feature is still visible without a key/quota. */
+const CHECK_IN_MOCK_REPLY: Record<ActivitySinceLastCheck, string> = {
+  idle: `${CHECK_IN_LABEL}(scripted — no live Gemini) You've gone quiet for a bit — want to talk me through your current thinking, or where you're stuck?`,
+  typing: `${CHECK_IN_LABEL}(scripted — no live Gemini) Take a second to trace your current approach against the examples above — does it actually hold up on all of them?`,
+};
 
 function describeTestResult(result: ExecutionResult): string {
   if (result.crashed) {
@@ -101,13 +116,39 @@ Guidelines:
 }
 
 /** The turn that stands in for the candidate when the editor is what changed. */
-function eventPrompt(event: InterviewEvent, testResult: ExecutionResult | null): string {
+function eventPrompt(
+  event: InterviewEvent,
+  testResult: ExecutionResult | null,
+  activity?: ActivitySinceLastCheck
+): string {
   if (event === "run") {
     return `[The candidate just ran their code against the test cases.
 ${testResult ? describeTestResult(testResult) : "No results came back."}
 React to this specific result. If cases fail, point at the case and the part of
 their code responsible without writing the fix for them. If everything passes,
 acknowledge it briefly and probe complexity or an edge case the tests miss.]`;
+  }
+
+  if (event === "periodic-check") {
+    const shared = `Never write or dictate the corrected code and never state the final
+fix outright — at most, name the concept, data structure, or edge case they're
+missing and ask a question that points them at it. If you have nothing worth
+interrupting for, reply with exactly "${NO_COMMENT}" and nothing else.`;
+
+    if (activity === "typing") {
+      return `[Two minutes have passed. The candidate has been typing in the editor
+this whole time without saying anything out loud. Look at the current editor
+contents above and judge whether their implementation is actually heading
+toward a correct solution. If it's the wrong approach, has a real logic bug, or
+will blow up in complexity, say so and nudge them toward the fix. ${shared}]`;
+    }
+
+    return `[Two minutes have passed with no typing and no talking — the candidate
+has gone quiet. Look at whatever is currently in the editor (it may be
+unchanged from before, or still the starter code). If what's there suggests
+they're heading down the wrong path, or they seem stuck without having
+committed to an approach, say so and ask a guiding question to get them moving
+again. ${shared}]`;
   }
 
   return `[The candidate has been writing code without saying anything. Look at the
@@ -118,12 +159,13 @@ ask about an edge case or the complexity. Don't repeat feedback you've already g
 
 export async function POST(request: Request) {
   const body = await request.json();
-  const { problemId, history, code, testResult, event } = body as {
+  const { problemId, history, code, testResult, event, activity } = body as {
     problemId?: string;
     history?: ChatTurn[];
     code?: string;
     testResult?: ExecutionResult | null;
     event?: InterviewEvent;
+    activity?: ActivitySinceLastCheck;
   };
 
   if (!problemId) {
@@ -144,7 +186,7 @@ export async function POST(request: Request) {
   }
 
   const contents: ChatTurn[] = event
-    ? [...turns, { role: "user", text: eventPrompt(event, testResult ?? null) }]
+    ? [...turns, { role: "user", text: eventPrompt(event, testResult ?? null, activity) }]
     : turns.length > 0
       ? turns
       : [
@@ -161,7 +203,15 @@ export async function POST(request: Request) {
       contents
     );
     if (reply) {
-      return NextResponse.json({ reply, mocked: false });
+      // A periodic check that found nothing wrong stays silent rather than
+      // interrupting with idle praise every two minutes.
+      if (event === "periodic-check" && reply.trim().toUpperCase() === NO_COMMENT) {
+        return NextResponse.json({ reply: null, mocked: false });
+      }
+      // Tagged so it's unmistakable in the transcript which messages came from
+      // the periodic checker versus the regular back-and-forth.
+      const taggedReply = event === "periodic-check" ? `${CHECK_IN_LABEL}${reply}` : reply;
+      return NextResponse.json({ reply: taggedReply, mocked: false });
     }
   } catch (err) {
     console.error("Gemini interview call failed, falling back to mock:", err);
@@ -170,8 +220,17 @@ export async function POST(request: Request) {
     quotaHit = isQuotaError(err);
   }
 
-  // An editor event has no scripted equivalent — staying quiet beats a canned
-  // line about code the script never saw.
+  // The periodic checker gets a scripted, clearly-labeled stand-in so it's
+  // visible in testing even without a working Gemini call — everything else
+  // stays quiet, since there's no canned line that could reflect their code.
+  if (event === "periodic-check") {
+    return NextResponse.json({
+      reply: CHECK_IN_MOCK_REPLY[activity ?? "idle"],
+      mocked: true,
+      reason: quotaHit ? "quota" : "unavailable",
+    });
+  }
+
   if (event) {
     return NextResponse.json({
       reply: null,
