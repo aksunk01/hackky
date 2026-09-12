@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
+import { DEFAULT_LANGUAGE, isLanguage, languageLabel } from "@/lib/languages";
 import { getProblem } from "@/lib/problems";
-import { runPython } from "@/lib/execute";
+import { runCode } from "@/lib/execute";
 import { generateJson, type ChatTurn } from "@/lib/gemini";
 
 export type Evaluation = {
@@ -42,10 +43,11 @@ function buildFallbackEvaluation(passed: number, total: number): Evaluation {
 
 export async function POST(request: Request) {
   const body = await request.json();
-  const { problemId, history, code } = body as {
+  const { problemId, history, code, language } = body as {
     problemId?: string;
     history?: ChatTurn[];
     code?: string;
+    language?: string;
   };
 
   if (!problemId || typeof code !== "string") {
@@ -60,7 +62,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unknown problem." }, { status: 404 });
   }
 
-  const execResult = await runPython(problem, code);
+  const lang = isLanguage(language) ? language : DEFAULT_LANGUAGE;
+  const execResult = await runCode(lang, problem, code);
   const fallback = buildFallbackEvaluation(execResult.passed, execResult.total);
 
   const transcript = (history ?? [])
@@ -69,8 +72,8 @@ export async function POST(request: Request) {
 
   const systemInstruction = `You are grading a technical coding interview. Problem: ${problem.title} - ${problem.description}
 
-Final candidate code:
-\`\`\`python
+Final candidate code, written in ${languageLabel(lang)}:
+\`\`\`${lang}
 ${code}
 \`\`\`
 

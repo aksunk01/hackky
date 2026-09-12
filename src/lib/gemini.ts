@@ -1,13 +1,15 @@
 import { ApiError, GoogleGenAI } from "@google/genai";
 
 /**
- * gemini-3.6-flash returns 429 on the free tier almost immediately — its
- * `generate_content_free_tier_requests` allowance is 20 — which silently
- * demoted the interviewer to scripted replies. 3.5-flash is a generation older
- * and has its own quota. Override with GEMINI_MODEL if you have headroom on a
- * newer one; note gemini-2.5-* 404s on v1beta.
+ * The free tier allows 20 generate_content requests *per day, per model*, and
+ * an interview burns those in minutes — every utterance, run and idle code
+ * review is a call — which silently demotes the interviewer to scripted
+ * replies. The -lite models carry a larger allowance, so they outlast a demo
+ * where plain 3.5-flash and 3.6-flash do not. Each model has its own daily
+ * bucket, so switching GEMINI_MODEL also buys a fresh one; note gemini-2.5-*
+ * is now retired and 404s.
  */
-const MODEL = process.env.GEMINI_MODEL ?? "gemini-3.5-flash";
+const MODEL = process.env.GEMINI_MODEL ?? "gemini-3.5-flash-lite";
 
 /** Transient failures worth another try: quota bounces and backend blips. */
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503]);

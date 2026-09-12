@@ -205,6 +205,34 @@ function releaseWhenEnded(audio: HTMLAudioElement) {
   });
 }
 
+/**
+ * Alex is told never to use LaTeX, but the model slips occasionally
+ * ("$O(n^2)$"), and ElevenLabs reads that literally — "dollar sign, O, open
+ * paren, n, caret, two". This is a last line of defense before synthesis, not
+ * a general LaTeX renderer: it only handles the handful of things that show up
+ * in complexity talk. The chat bubble still shows the model's raw text; only
+ * what gets spoken is cleaned up.
+ */
+function sanitizeForSpeech(text: string): string {
+  return text
+    .replace(/\$+/g, "")
+    .replace(/\\times/gi, " times")
+    .replace(/\\cdot/gi, " times")
+    .replace(/\\log/gi, "log")
+    .replace(/\\sqrt/gi, "square root of")
+    .replace(/\^\{([^}]+)\}/g, " to the $1")
+    .replace(/\^2\b/g, " squared")
+    .replace(/\^3\b/g, " cubed")
+    .replace(/\^(-?\d+)/g, " to the power of $1")
+    .replace(/\^([a-zA-Z])\b/g, " to the $1")
+    .replace(/\\/g, "")
+    // Whatever braces are left are LaTeX grouping (e.g. \sqrt{n} above became
+    // "square root of{n}") rather than meaningful punctuation, so unwrap them.
+    .replace(/\{([^{}]*)\}/g, " $1 ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /** Human-readable reason an `<audio>` element failed, for logging. */
 function describeAudioError(audio: HTMLAudioElement): string {
   const names: Record<number, string> = {
@@ -231,6 +259,8 @@ function describeAudioError(audio: HTMLAudioElement): string {
  */
 export async function speak(text: string) {
   if (typeof window === "undefined" || !text.trim()) return;
+  const spoken = sanitizeForSpeech(text);
+  if (!spoken) return;
 
   stopSpeaking();
 
@@ -244,7 +274,7 @@ export async function speak(text: string) {
   setAudible(true);
 
   try {
-    const encodedText = encodeURIComponent(text);
+    const encodedText = encodeURIComponent(spoken);
 
     if (encodedText.length <= MAX_STREAM_URL_TEXT_LENGTH) {
       const audio = new Audio();
@@ -279,7 +309,7 @@ export async function speak(text: string) {
     const res = await fetch("/api/stream-speech", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text: spoken }),
       signal: controller.signal,
     });
 
