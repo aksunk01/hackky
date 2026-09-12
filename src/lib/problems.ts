@@ -22,9 +22,9 @@ export type Problem = {
   constraints: string[];
   funcName: string;
   /**
-   * Every problem has Python (and, mechanically, JavaScript). The statically
-   * typed languages are only wired up where paramTypes/returnType are also
-   * given — until then the picker simply doesn't offer them for that problem.
+   * Every problem offers all six languages: paramTypes/returnType (both
+   * always given together) tell the four statically typed runners how to
+   * declare each test case's arguments and print the return value back out.
    */
   starterCode: Partial<Record<Language, string>>;
   paramTypes?: ValueType[];
@@ -232,6 +232,8 @@ export const problems: Problem[] = [
       "s consists of English letters, digits, symbols, and spaces.",
     ],
     funcName: "length_of_longest_substring",
+    paramTypes: ["string"],
+    returnType: "int",
     starterCode: {
       python: `def length_of_longest_substring(s):
     # your code here
@@ -239,6 +241,30 @@ export const problems: Problem[] = [
 `,
       javascript: `function length_of_longest_substring(s) {
   // your code here
+}
+`,
+      cpp: `int length_of_longest_substring(string s) {
+    // your code here
+    return 0;
+}
+`,
+      c: `int length_of_longest_substring(char* s) {
+    // your code here
+    return 0;
+}
+`,
+      java: `class Solution {
+    public int length_of_longest_substring(String s) {
+        // your code here
+        return 0;
+    }
+}
+`,
+      csharp: `public class Solution {
+    public int length_of_longest_substring(string s) {
+        // your code here
+        return 0;
+    }
 }
 `,
     },
@@ -263,6 +289,8 @@ export const problems: Problem[] = [
     ],
     constraints: ["1 <= s.length <= 1000", "s consists of digits and English letters."],
     funcName: "longest_palindrome",
+    paramTypes: ["string"],
+    returnType: "string",
     starterCode: {
       python: `def longest_palindrome(s):
     # your code here
@@ -270,6 +298,30 @@ export const problems: Problem[] = [
 `,
       javascript: `function longest_palindrome(s) {
   // your code here
+}
+`,
+      cpp: `string longest_palindrome(string s) {
+    // your code here
+    return "";
+}
+`,
+      c: `char* longest_palindrome(char* s) {
+    // your code here
+    return "";
+}
+`,
+      java: `class Solution {
+    public String longest_palindrome(String s) {
+        // your code here
+        return "";
+    }
+}
+`,
+      csharp: `public class Solution {
+    public string longest_palindrome(string s) {
+        // your code here
+        return "";
+    }
 }
 `,
     },
@@ -281,41 +333,63 @@ export const problems: Problem[] = [
     ],
   },
   {
-    id: "group-anagrams",
-    title: "Group Anagrams",
+    id: "multiply-strings",
+    title: "Multiply Strings",
     difficulty: "Medium",
-    tags: "Strings / Hash Map",
+    tags: "Strings / Math",
     description:
-      "Given an array of strings strs, group the anagrams together. Return the groups as a list of lists: sort the words inside each group alphabetically, then sort the groups by their first word.",
+      "Given two non-negative integers num1 and num2 represented as strings, return the product of num1 and num2, also represented as a string. You must not convert the inputs directly to integers or use a built-in big-integer type.",
     examples: [
-      {
-        input: 'strs = ["eat","tea","tan","ate","nat","bat"]',
-        output: '[["ate","eat","tea"],["bat"],["nat","tan"]]',
-      },
+      { input: 'num1 = "2", num2 = "3"', output: '"6"' },
+      { input: 'num1 = "123", num2 = "456"', output: '"56088"' },
     ],
     constraints: [
-      "1 <= strs.length <= 10^4",
-      "0 <= strs[i].length <= 100",
-      "strs[i] consists of lowercase English letters.",
+      "1 <= num1.length, num2.length <= 200",
+      "num1 and num2 consist of digits only.",
+      "Neither num1 nor num2 has leading zeros, except the number 0 itself.",
     ],
-    funcName: "group_anagrams",
+    funcName: "multiply",
+    paramTypes: ["string", "string"],
+    returnType: "string",
     starterCode: {
-      python: `def group_anagrams(strs):
+      python: `def multiply(num1, num2):
     # your code here
     pass
 `,
-      javascript: `function group_anagrams(strs) {
+      javascript: `function multiply(num1, num2) {
   // your code here
+}
+`,
+      cpp: `string multiply(string num1, string num2) {
+    // your code here
+    return "";
+}
+`,
+      c: `char* multiply(char* num1, char* num2) {
+    // your code here
+    return "";
+}
+`,
+      java: `class Solution {
+    public String multiply(String num1, String num2) {
+        // your code here
+        return "";
+    }
+}
+`,
+      csharp: `public class Solution {
+    public string multiply(string num1, string num2) {
+        // your code here
+        return "";
+    }
 }
 `,
     },
     testCases: [
-      {
-        args: [["eat", "tea", "tan", "ate", "nat", "bat"]],
-        expected: [["ate", "eat", "tea"], ["bat"], ["nat", "tan"]],
-      },
-      { args: [[""]], expected: [[""]] },
-      { args: [["a"]], expected: [["a"]] },
+      { args: ["2", "3"], expected: "6" },
+      { args: ["123", "456"], expected: "56088" },
+      { args: ["0", "12"], expected: "0" },
+      { args: ["99", "99"], expected: "9801" },
     ],
   },
   {
@@ -332,6 +406,8 @@ export const problems: Problem[] = [
     ],
     constraints: ["1 <= s.length, t.length <= 200", "s and t only contain lowercase letters and '#'."],
     funcName: "backspace_compare",
+    paramTypes: ["string", "string"],
+    returnType: "bool",
     starterCode: {
       python: `def backspace_compare(s, t):
     # your code here
@@ -339,6 +415,30 @@ export const problems: Problem[] = [
 `,
       javascript: `function backspace_compare(s, t) {
   // your code here
+}
+`,
+      cpp: `bool backspace_compare(string s, string t) {
+    // your code here
+    return false;
+}
+`,
+      c: `bool backspace_compare(char* s, char* t) {
+    // your code here
+    return false;
+}
+`,
+      java: `class Solution {
+    public boolean backspace_compare(String s, String t) {
+        // your code here
+        return false;
+    }
+}
+`,
+      csharp: `public class Solution {
+    public bool backspace_compare(string s, string t) {
+        // your code here
+        return false;
+    }
 }
 `,
     },
@@ -362,6 +462,8 @@ export const problems: Problem[] = [
     ],
     constraints: ["1 <= prices.length <= 10^5", "0 <= prices[i] <= 10^4"],
     funcName: "max_profit",
+    paramTypes: ["int[]"],
+    returnType: "int",
     starterCode: {
       python: `def max_profit(prices):
     # your code here
@@ -369,6 +471,30 @@ export const problems: Problem[] = [
 `,
       javascript: `function max_profit(prices) {
   // your code here
+}
+`,
+      cpp: `int max_profit(vector<int>& prices) {
+    // your code here
+    return 0;
+}
+`,
+      c: `int max_profit(int* prices, int pricesSize) {
+    // your code here
+    return 0;
+}
+`,
+      java: `class Solution {
+    public int max_profit(int[] prices) {
+        // your code here
+        return 0;
+    }
+}
+`,
+      csharp: `public class Solution {
+    public int max_profit(int[] prices) {
+        // your code here
+        return 0;
+    }
 }
 `,
     },
@@ -392,6 +518,8 @@ export const problems: Problem[] = [
     ],
     constraints: ["n == gas.length == cost.length", "1 <= n <= 10^5", "0 <= gas[i], cost[i] <= 10^4"],
     funcName: "can_complete_circuit",
+    paramTypes: ["int[]", "int[]"],
+    returnType: "int",
     starterCode: {
       python: `def can_complete_circuit(gas, cost):
     # your code here
@@ -399,6 +527,30 @@ export const problems: Problem[] = [
 `,
       javascript: `function can_complete_circuit(gas, cost) {
   // your code here
+}
+`,
+      cpp: `int can_complete_circuit(vector<int>& gas, vector<int>& cost) {
+    // your code here
+    return -1;
+}
+`,
+      c: `int can_complete_circuit(int* gas, int gasSize, int* cost, int costSize) {
+    // your code here
+    return -1;
+}
+`,
+      java: `class Solution {
+    public int can_complete_circuit(int[] gas, int[] cost) {
+        // your code here
+        return -1;
+    }
+}
+`,
+      csharp: `public class Solution {
+    public int can_complete_circuit(int[] gas, int[] cost) {
+        // your code here
+        return -1;
+    }
 }
 `,
     },
@@ -423,6 +575,8 @@ export const problems: Problem[] = [
     ],
     constraints: ["2 <= arr.length <= 10^5", "-10^6 <= arr[i] <= 10^6", "All elements are distinct."],
     funcName: "minimum_abs_difference",
+    paramTypes: ["int[]"],
+    returnType: "int[][]",
     starterCode: {
       python: `def minimum_abs_difference(arr):
     # your code here
@@ -430,6 +584,32 @@ export const problems: Problem[] = [
 `,
       javascript: `function minimum_abs_difference(arr) {
   // your code here
+}
+`,
+      cpp: `vector<vector<int>> minimum_abs_difference(vector<int>& arr) {
+    // your code here
+    return {};
+}
+`,
+      c: `int** minimum_abs_difference(int* arr, int arrSize, int* returnSize, int** returnColumnSizes) {
+    // your code here
+    *returnSize = 0;
+    *returnColumnSizes = NULL;
+    return NULL;
+}
+`,
+      java: `class Solution {
+    public int[][] minimum_abs_difference(int[] arr) {
+        // your code here
+        return new int[0][0];
+    }
+}
+`,
+      csharp: `public class Solution {
+    public int[][] minimum_abs_difference(int[] arr) {
+        // your code here
+        return new int[0][];
+    }
 }
 `,
     },
@@ -445,19 +625,21 @@ export const problems: Problem[] = [
     difficulty: "Medium",
     tags: "BFS/DFS / Matrix",
     description:
-      "Given an m x n grid where '1' represents land and '0' represents water, return the number of islands. An island is a group of '1's connected horizontally or vertically.",
+      "Given an m x n grid of integers where 1 represents land and 0 represents water, return the number of islands. An island is a group of 1's connected horizontally or vertically.",
     examples: [
       {
-        input: 'grid = [["1","1","1","1","0"],["1","1","0","1","0"],["1","1","0","0","0"],["0","0","0","0","0"]]',
+        input: "grid = [[1,1,1,1,0],[1,1,0,1,0],[1,1,0,0,0],[0,0,0,0,0]]",
         output: "1",
       },
       {
-        input: 'grid = [["1","1","0","0","0"],["1","1","0","0","0"],["0","0","1","0","0"],["0","0","0","1","1"]]',
+        input: "grid = [[1,1,0,0,0],[1,1,0,0,0],[0,0,1,0,0],[0,0,0,1,1]]",
         output: "3",
       },
     ],
-    constraints: ["1 <= m, n <= 300", "grid[i][j] is '0' or '1'."],
+    constraints: ["1 <= m, n <= 300", "grid[i][j] is 0 or 1."],
     funcName: "num_islands",
+    paramTypes: ["int[][]"],
+    returnType: "int",
     starterCode: {
       python: `def num_islands(grid):
     # your code here
@@ -467,14 +649,38 @@ export const problems: Problem[] = [
   // your code here
 }
 `,
+      cpp: `int num_islands(vector<vector<int>>& grid) {
+    // your code here
+    return 0;
+}
+`,
+      c: `int num_islands(int** grid, int gridSize, int* gridColSize) {
+    // your code here
+    return 0;
+}
+`,
+      java: `class Solution {
+    public int num_islands(int[][] grid) {
+        // your code here
+        return 0;
+    }
+}
+`,
+      csharp: `public class Solution {
+    public int num_islands(int[][] grid) {
+        // your code here
+        return 0;
+    }
+}
+`,
     },
     testCases: [
       {
-        args: [[["1", "1", "1", "1", "0"], ["1", "1", "0", "1", "0"], ["1", "1", "0", "0", "0"], ["0", "0", "0", "0", "0"]]],
+        args: [[[1, 1, 1, 1, 0], [1, 1, 0, 1, 0], [1, 1, 0, 0, 0], [0, 0, 0, 0, 0]]],
         expected: 1,
       },
       {
-        args: [[["1", "1", "0", "0", "0"], ["1", "1", "0", "0", "0"], ["0", "0", "1", "0", "0"], ["0", "0", "0", "1", "1"]]],
+        args: [[[1, 1, 0, 0, 0], [1, 1, 0, 0, 0], [0, 0, 1, 0, 0], [0, 0, 0, 1, 1]]],
         expected: 3,
       },
     ],
@@ -491,6 +697,8 @@ export const problems: Problem[] = [
     ],
     constraints: ["1 <= m, n <= 50", "0 <= image[i][j], color < 65536", "0 <= sr < m", "0 <= sc < n"],
     funcName: "flood_fill",
+    paramTypes: ["int[][]", "int", "int", "int"],
+    returnType: "int[][]",
     starterCode: {
       python: `def flood_fill(image, sr, sc, color):
     # your code here
@@ -498,6 +706,33 @@ export const problems: Problem[] = [
 `,
       javascript: `function flood_fill(image, sr, sc, color) {
   // your code here
+}
+`,
+      cpp: `vector<vector<int>> flood_fill(vector<vector<int>>& image, int sr, int sc, int color) {
+    // your code here
+    return {};
+}
+`,
+      c: `int** flood_fill(int** image, int imageSize, int* imageColSize, int sr, int sc, int color,
+                  int* returnSize, int** returnColumnSizes) {
+    // your code here
+    *returnSize = 0;
+    *returnColumnSizes = NULL;
+    return NULL;
+}
+`,
+      java: `class Solution {
+    public int[][] flood_fill(int[][] image, int sr, int sc, int color) {
+        // your code here
+        return new int[0][0];
+    }
+}
+`,
+      csharp: `public class Solution {
+    public int[][] flood_fill(int[][] image, int sr, int sc, int color) {
+        // your code here
+        return new int[0][];
+    }
 }
 `,
     },
@@ -519,6 +754,8 @@ export const problems: Problem[] = [
     ],
     constraints: ["1 <= arr.length <= 10^5", "-10^4 <= arr[i] <= 10^4"],
     funcName: "prefix_sum",
+    paramTypes: ["int[]"],
+    returnType: "int[]",
     starterCode: {
       python: `def prefix_sum(arr):
     # your code here
@@ -526,6 +763,31 @@ export const problems: Problem[] = [
 `,
       javascript: `function prefix_sum(arr) {
   // your code here
+}
+`,
+      cpp: `vector<int> prefix_sum(vector<int>& arr) {
+    // your code here
+    return {};
+}
+`,
+      c: `int* prefix_sum(int* arr, int arrSize, int* returnSize) {
+    // your code here
+    *returnSize = 0;
+    return NULL;
+}
+`,
+      java: `class Solution {
+    public int[] prefix_sum(int[] arr) {
+        // your code here
+        return new int[0];
+    }
+}
+`,
+      csharp: `public class Solution {
+    public int[] prefix_sum(int[] arr) {
+        // your code here
+        return new int[0];
+    }
 }
 `,
     },
@@ -549,6 +811,8 @@ export const problems: Problem[] = [
     ],
     constraints: ["1 <= nums.length <= 10^5", "-10^9 <= nums[i] <= 10^9"],
     funcName: "next_greater_elements",
+    paramTypes: ["int[]"],
+    returnType: "int[]",
     starterCode: {
       python: `def next_greater_elements(nums):
     # your code here
@@ -556,6 +820,31 @@ export const problems: Problem[] = [
 `,
       javascript: `function next_greater_elements(nums) {
   // your code here
+}
+`,
+      cpp: `vector<int> next_greater_elements(vector<int>& nums) {
+    // your code here
+    return {};
+}
+`,
+      c: `int* next_greater_elements(int* nums, int numsSize, int* returnSize) {
+    // your code here
+    *returnSize = 0;
+    return NULL;
+}
+`,
+      java: `class Solution {
+    public int[] next_greater_elements(int[] nums) {
+        // your code here
+        return new int[0];
+    }
+}
+`,
+      csharp: `public class Solution {
+    public int[] next_greater_elements(int[] nums) {
+        // your code here
+        return new int[0];
+    }
 }
 `,
     },
@@ -583,6 +872,8 @@ export const problems: Problem[] = [
       "1 <= capacity <= 10^5",
     ],
     funcName: "car_pooling",
+    paramTypes: ["int[][]", "int"],
+    returnType: "bool",
     starterCode: {
       python: `def car_pooling(trips, capacity):
     # your code here
@@ -590,6 +881,30 @@ export const problems: Problem[] = [
 `,
       javascript: `function car_pooling(trips, capacity) {
   // your code here
+}
+`,
+      cpp: `bool car_pooling(vector<vector<int>>& trips, int capacity) {
+    // your code here
+    return false;
+}
+`,
+      c: `bool car_pooling(int** trips, int tripsSize, int* tripsColSize, int capacity) {
+    // your code here
+    return false;
+}
+`,
+      java: `class Solution {
+    public boolean car_pooling(int[][] trips, int capacity) {
+        // your code here
+        return false;
+    }
+}
+`,
+      csharp: `public class Solution {
+    public bool car_pooling(int[][] trips, int capacity) {
+        // your code here
+        return false;
+    }
 }
 `,
     },
@@ -612,6 +927,8 @@ export const problems: Problem[] = [
     ],
     constraints: ["1 <= nums.length <= 1000", "-10^9 <= nums[i] <= 10^9"],
     funcName: "sub_array_ranges",
+    paramTypes: ["int[]"],
+    returnType: "int",
     starterCode: {
       python: `def sub_array_ranges(nums):
     # your code here
@@ -619,6 +936,30 @@ export const problems: Problem[] = [
 `,
       javascript: `function sub_array_ranges(nums) {
   // your code here
+}
+`,
+      cpp: `int sub_array_ranges(vector<int>& nums) {
+    // your code here
+    return 0;
+}
+`,
+      c: `int sub_array_ranges(int* nums, int numsSize) {
+    // your code here
+    return 0;
+}
+`,
+      java: `class Solution {
+    public int sub_array_ranges(int[] nums) {
+        // your code here
+        return 0;
+    }
+}
+`,
+      csharp: `public class Solution {
+    public int sub_array_ranges(int[] nums) {
+        // your code here
+        return 0;
+    }
 }
 `,
     },
@@ -634,13 +975,15 @@ export const problems: Problem[] = [
     difficulty: "Medium",
     tags: "Arrays / Sliding Window",
     description:
-      "You're given a char array days made of 'w' (work day) and 'h' (holiday), and an integer h representing how many work days you're allowed to convert into holidays. Return the length of the longest contiguous subarray that can be made entirely of holidays using at most h conversions.",
+      "You're given a string days made of 'w' (work day) and 'h' (holiday), and an integer h representing how many work days you're allowed to convert into holidays. Return the length of the longest contiguous substring that can be made entirely of holidays using at most h conversions.",
     examples: [
       { input: 'days = "wwhhwwhhww", h = 2', output: "6" },
       { input: 'days = "wwww", h = 0', output: "0" },
     ],
     constraints: ["1 <= days.length <= 10^5", "0 <= h <= days.length"],
     funcName: "longest_holiday_subarray",
+    paramTypes: ["string", "int"],
+    returnType: "int",
     starterCode: {
       python: `def longest_holiday_subarray(days, h):
     # your code here
@@ -650,12 +993,36 @@ export const problems: Problem[] = [
   // your code here
 }
 `,
+      cpp: `int longest_holiday_subarray(string days, int h) {
+    // your code here
+    return 0;
+}
+`,
+      c: `int longest_holiday_subarray(char* days, int h) {
+    // your code here
+    return 0;
+}
+`,
+      java: `class Solution {
+    public int longest_holiday_subarray(String days, int h) {
+        // your code here
+        return 0;
+    }
+}
+`,
+      csharp: `public class Solution {
+    public int longest_holiday_subarray(string days, int h) {
+        // your code here
+        return 0;
+    }
+}
+`,
     },
     testCases: [
-      { args: [["w", "w", "h", "h", "w", "w", "h", "h", "w", "w"], 2], expected: 6 },
-      { args: [["h", "h", "w", "w", "w", "h", "h", "h", "w", "w"], 1], expected: 4 },
-      { args: [["w", "w", "w", "w"], 0], expected: 0 },
-      { args: [["h", "h", "h", "h"], 5], expected: 4 },
+      { args: ["wwhhwwhhww", 2], expected: 6 },
+      { args: ["hhwwwhhhww", 1], expected: 4 },
+      { args: ["wwww", 0], expected: 0 },
+      { args: ["hhhh", 5], expected: 4 },
     ],
   },
   {
@@ -675,6 +1042,8 @@ export const problems: Problem[] = [
       "s consists of integers and the operators '+','-','*','/' with spaces.",
     ],
     funcName: "calculate",
+    paramTypes: ["string"],
+    returnType: "int",
     starterCode: {
       python: `def calculate(s):
     # your code here
@@ -682,6 +1051,30 @@ export const problems: Problem[] = [
 `,
       javascript: `function calculate(s) {
   // your code here
+}
+`,
+      cpp: `int calculate(string s) {
+    // your code here
+    return 0;
+}
+`,
+      c: `int calculate(char* s) {
+    // your code here
+    return 0;
+}
+`,
+      java: `class Solution {
+    public int calculate(String s) {
+        // your code here
+        return 0;
+    }
+}
+`,
+      csharp: `public class Solution {
+    public int calculate(string s) {
+        // your code here
+        return 0;
+    }
 }
 `,
     },
@@ -708,6 +1101,8 @@ export const problems: Problem[] = [
       "1 <= minSize <= maxSize <= min(26, s.length)",
     ],
     funcName: "max_freq",
+    paramTypes: ["string", "int", "int", "int"],
+    returnType: "int",
     starterCode: {
       python: `def max_freq(s, maxLetters, minSize, maxSize):
     # your code here
@@ -715,6 +1110,30 @@ export const problems: Problem[] = [
 `,
       javascript: `function max_freq(s, maxLetters, minSize, maxSize) {
   // your code here
+}
+`,
+      cpp: `int max_freq(string s, int maxLetters, int minSize, int maxSize) {
+    // your code here
+    return 0;
+}
+`,
+      c: `int max_freq(char* s, int maxLetters, int minSize, int maxSize) {
+    // your code here
+    return 0;
+}
+`,
+      java: `class Solution {
+    public int max_freq(String s, int maxLetters, int minSize, int maxSize) {
+        // your code here
+        return 0;
+    }
+}
+`,
+      csharp: `public class Solution {
+    public int max_freq(string s, int maxLetters, int minSize, int maxSize) {
+        // your code here
+        return 0;
+    }
 }
 `,
     },
@@ -736,6 +1155,8 @@ export const problems: Problem[] = [
     ],
     constraints: ["1 <= s.length <= 10^5", "s consists only of 'H' and 'T'."],
     funcName: "min_flips",
+    paramTypes: ["string"],
+    returnType: "int",
     starterCode: {
       python: `def min_flips(s):
     # your code here
@@ -743,6 +1164,30 @@ export const problems: Problem[] = [
 `,
       javascript: `function min_flips(s) {
   // your code here
+}
+`,
+      cpp: `int min_flips(string s) {
+    // your code here
+    return 0;
+}
+`,
+      c: `int min_flips(char* s) {
+    // your code here
+    return 0;
+}
+`,
+      java: `class Solution {
+    public int min_flips(String s) {
+        // your code here
+        return 0;
+    }
+}
+`,
+      csharp: `public class Solution {
+    public int min_flips(string s) {
+        // your code here
+        return 0;
+    }
 }
 `,
     },
@@ -766,6 +1211,8 @@ export const problems: Problem[] = [
     ],
     constraints: ["0 <= a.length, b.length <= 10^5", "-10^9 <= a[i], b[i] <= 10^9"],
     funcName: "merge_sorted_arrays",
+    paramTypes: ["int[]", "int[]"],
+    returnType: "int[]",
     starterCode: {
       python: `def merge_sorted_arrays(a, b):
     # your code here
@@ -773,6 +1220,31 @@ export const problems: Problem[] = [
 `,
       javascript: `function merge_sorted_arrays(a, b) {
   // your code here
+}
+`,
+      cpp: `vector<int> merge_sorted_arrays(vector<int>& a, vector<int>& b) {
+    // your code here
+    return {};
+}
+`,
+      c: `int* merge_sorted_arrays(int* a, int aSize, int* b, int bSize, int* returnSize) {
+    // your code here
+    *returnSize = 0;
+    return NULL;
+}
+`,
+      java: `class Solution {
+    public int[] merge_sorted_arrays(int[] a, int[] b) {
+        // your code here
+        return new int[0];
+    }
+}
+`,
+      csharp: `public class Solution {
+    public int[] merge_sorted_arrays(int[] a, int[] b) {
+        // your code here
+        return new int[0];
+    }
 }
 `,
     },
@@ -783,33 +1255,67 @@ export const problems: Problem[] = [
     ],
   },
   {
-    id: "alien-dictionary",
-    title: "Alien Dictionary",
-    difficulty: "Hard",
+    id: "course-schedule",
+    title: "Course Schedule",
+    difficulty: "Medium",
     tags: "Graphs / Topological Sort",
     description:
-      "Given a list of words from an alien language, sorted lexicographically by that language's unknown alphabet, derive the order of characters. Return a string of the unique letters in that order. When multiple letters have no remaining ordering constraint at some step, break the tie by choosing the lexicographically smallest one (standard English order) — every test case here has exactly one answer under that rule. Return an empty string if the input is invalid (e.g. contradictory ordering, or a later word that is a prefix of an earlier one).",
+      "There are numCourses courses labeled 0 to numCourses - 1. You're given prerequisites where prerequisites[i] = [a, b] means you must take course b before course a. Given numCourses and prerequisites, return true if you can finish all courses, or false if it's impossible (i.e. the prerequisites contain a cycle).",
     examples: [
-      { input: 'words = ["wrt","wrf","er","ett","rftt"]', output: '"wertf"' },
-      { input: 'words = ["z","x"]', output: '"zx"' },
-      { input: 'words = ["z","x","z"]', output: '""', explanation: "Contradiction: z < x and x < z can't both hold." },
+      { input: "numCourses = 2, prerequisites = [[1,0]]", output: "true" },
+      {
+        input: "numCourses = 2, prerequisites = [[1,0],[0,1]]",
+        output: "false",
+        explanation: "To take course 1 you need course 0, and to take course 0 you need course 1 — a cycle.",
+      },
     ],
-    constraints: ["1 <= words.length <= 100", "words[i] consists of lowercase English letters."],
-    funcName: "alien_order",
+    constraints: [
+      "1 <= numCourses <= 2000",
+      "0 <= prerequisites.length <= 5000",
+      "prerequisites[i].length == 2",
+    ],
+    funcName: "can_finish",
+    paramTypes: ["int", "int[][]"],
+    returnType: "bool",
     starterCode: {
-      python: `def alien_order(words):
+      python: `def can_finish(numCourses, prerequisites):
     # your code here
     pass
 `,
-      javascript: `function alien_order(words) {
+      javascript: `function can_finish(numCourses, prerequisites) {
   // your code here
+}
+`,
+      cpp: `bool can_finish(int numCourses, vector<vector<int>>& prerequisites) {
+    // your code here
+    return false;
+}
+`,
+      c: `bool can_finish(int numCourses, int** prerequisites, int prerequisitesSize, int* prerequisitesColSize) {
+    // your code here
+    return false;
+}
+`,
+      java: `class Solution {
+    public boolean can_finish(int numCourses, int[][] prerequisites) {
+        // your code here
+        return false;
+    }
+}
+`,
+      csharp: `public class Solution {
+    public bool can_finish(int numCourses, int[][] prerequisites) {
+        // your code here
+        return false;
+    }
 }
 `,
     },
     testCases: [
-      { args: [["wrt", "wrf", "er", "ett", "rftt"]], expected: "wertf" },
-      { args: [["z", "x"]], expected: "zx" },
-      { args: [["z", "x", "z"]], expected: "" },
+      { args: [2, [[1, 0]]], expected: true },
+      { args: [2, [[1, 0], [0, 1]]], expected: false },
+      { args: [1, []], expected: true },
+      { args: [3, [[1, 0], [2, 1]]], expected: true },
     ],
   },
 ];

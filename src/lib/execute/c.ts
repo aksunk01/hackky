@@ -20,6 +20,7 @@ const PRELUDE = `#include <stdio.h>
 #include <stdbool.h>
 #include <string.h>
 #include <limits.h>
+#include <ctype.h>
 `;
 
 const EMITTERS = `static void _emitStr(const char* s) {

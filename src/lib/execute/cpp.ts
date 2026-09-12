@@ -27,6 +27,8 @@ const PRELUDE = `#include <cstdio>
 #include <stack>
 #include <climits>
 #include <cmath>
+#include <cctype>
+#include <functional>
 #include <exception>
 using namespace std;
 `;
