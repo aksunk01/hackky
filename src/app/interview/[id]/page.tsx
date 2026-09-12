@@ -263,8 +263,11 @@ export default function InterviewPage({
     }
   }
 
+  // Drives the mic button/placeholder in three places below, so compute once.
+  const mutedForSpeaking = listening && interviewerSpeaking;
+
   return (
-    <main className="flex-1 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,1fr)] gap-4 p-4 h-screen overflow-hidden">
+    <main className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,1fr)] gap-4 p-4 h-screen overflow-hidden">
       {/* Problem description */}
       <section className="flex flex-col rounded-xl border border-black/10 dark:border-white/10 overflow-y-auto p-5">
         <div className="flex items-center gap-2 mb-1">
@@ -371,7 +374,7 @@ export default function InterviewPage({
             Voice: {voiceOn ? "On" : "Off"}
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-3">
           {messages.map((m, i) => (
             <div
               key={i}
@@ -406,7 +409,7 @@ export default function InterviewPage({
             onChange={(e) => setChatInput(e.target.value)}
             placeholder={
               listening
-                ? interviewerSpeaking
+                ? mutedForSpeaking
                   ? "Mic off while Alex responds..."
                   : "Listening — just start talking..."
                 : "Type your response..."
@@ -418,21 +421,21 @@ export default function InterviewPage({
               type="button"
               onClick={() => setMicOn((prev) => !prev)}
               title={
-                listening && interviewerSpeaking
+                mutedForSpeaking
                   ? "Muted while Alex responds"
                   : micOn
                     ? "Mute the microphone"
                     : "Unmute the microphone"
               }
               className={`rounded-full px-4 py-2 text-sm ${
-                listening && interviewerSpeaking
+                mutedForSpeaking
                   ? "bg-amber-500 text-white"
                   : listening
                     ? "bg-red-600 text-white"
                     : "bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/20"
               }`}
             >
-              {!micOn ? "Mic off" : listening && interviewerSpeaking ? "Muted" : "Mic on"}
+              {!micOn ? "Mic off" : mutedForSpeaking ? "Muted" : "Mic on"}
             </button>
           )}
           <button

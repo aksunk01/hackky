@@ -21,6 +21,12 @@ const IDLE_ROTATE_MS = 10_000;
 const PARTIAL_INTERVAL_MS = 1_200;
 /** Keep the mic closed briefly after playback, to let room echo die out. */
 const ECHO_TAIL_MS = 700;
+/**
+ * Longest reply, once URL-encoded, that rides in the streaming endpoint's
+ * query string. Above this a reply falls back to fetching the whole clip
+ * before playback rather than risking a truncated request line.
+ */
+const MAX_STREAM_URL_TEXT_LENGTH = 1800;
 
 export function isMicrophoneRecordingSupported(): boolean {
   return (
@@ -77,8 +83,12 @@ async function transcribe(blob: Blob, contentType: string): Promise<string> {
 
 /* ---------------------------------------------------------------- playback -- */
 
-/** The currently playing utterance, so a new one can supersede it. */
-let current: { audio: HTMLAudioElement; url: string } | null = null;
+/**
+ * The currently playing utterance, so a new one can supersede it. `url` is
+ * only set for the buffered fallback path — the streamed `<audio src>` path
+ * has no blob to revoke.
+ */
+let current: { audio: HTMLAudioElement; url: string | null } | null = null;
 /** Lets stopSpeaking() cancel a request whose audio hasn't arrived yet. */
 let inFlight: AbortController | null = null;
 /** True while the interviewer's voice is actually coming out of the speakers. */
@@ -178,14 +188,46 @@ function releaseCurrent() {
   current.audio.pause();
   // Freeing the blob matters here: replies are synthesized continuously, so
   // leaked object URLs would accumulate for the life of the interview.
-  URL.revokeObjectURL(current.url);
+  if (current.url) URL.revokeObjectURL(current.url);
+  // Dropping the src (not just pausing) cancels the in-progress network
+  // request for the streamed path — pausing alone leaves the browser still
+  // downloading a reply nobody is going to hear.
+  current.audio.removeAttribute("src");
+  current.audio.load();
   current = null;
   setAudible(false);
 }
 
+/** Releases `audio` once it finishes, provided a newer attempt hasn't already. */
+function releaseWhenEnded(audio: HTMLAudioElement) {
+  audio.addEventListener("ended", () => {
+    if (current?.audio === audio) releaseCurrent();
+  });
+}
+
+/** Human-readable reason an `<audio>` element failed, for logging. */
+function describeAudioError(audio: HTMLAudioElement): string {
+  const names: Record<number, string> = {
+    1: "aborted",
+    2: "network error",
+    3: "decode error",
+    4: "source not supported",
+  };
+  const code = audio.error?.code;
+  return code ? (names[code] ?? `error code ${code}`) : "unknown error";
+}
+
 /**
- * Synthesizes `text` with our ElevenLabs backend and plays the MP3 it returns.
- * Any utterance already playing (or still being fetched) is cancelled first.
+ * Synthesizes `text` with our ElevenLabs backend and plays it. Any utterance
+ * already playing (or still being fetched) is cancelled first.
+ *
+ * Short replies point the `<audio>` element straight at the streaming
+ * endpoint (GET, text in the query string) so the browser can start playback
+ * as soon as the first bytes of the reply arrive. Buffering the whole reply
+ * first — fetch, await the full blob, then play — was adding the entire
+ * synthesis + download time to the gap between the candidate finishing and
+ * the interviewer starting to talk. Replies too long to fit a URL comfortably
+ * fall back to that buffered path.
  */
 export async function speak(text: string) {
   if (typeof window === "undefined" || !text.trim()) return;
@@ -202,6 +244,38 @@ export async function speak(text: string) {
   setAudible(true);
 
   try {
+    const encodedText = encodeURIComponent(text);
+
+    if (encodedText.length <= MAX_STREAM_URL_TEXT_LENGTH) {
+      const audio = new Audio();
+      current = { audio, url: null };
+      releaseWhenEnded(audio);
+
+      // HTTP/decode failures on the underlying request surface as "error" on
+      // the element rather than a play() rejection, and can also arrive after
+      // playback has already started (a network drop mid-stream) — handle
+      // cleanup here rather than relying on play() alone.
+      audio.addEventListener("error", () => {
+        if (current?.audio !== audio) return;
+        console.error(`[speak] playback failed: ${describeAudioError(audio)}`);
+        releaseCurrent();
+      });
+
+      audio.src = `/api/stream-speech?text=${encodedText}`;
+      try {
+        await audio.play();
+      } catch (error) {
+        // Already cleaned up by the "error" listener above if that's what
+        // caused this rejection; only act if this is a distinct failure
+        // (e.g. an autoplay-policy rejection with no element-level error).
+        if (current?.audio === audio) {
+          console.error("[speak] playback failed to start:", error);
+          releaseCurrent();
+        }
+      }
+      return;
+    }
+
     const res = await fetch("/api/stream-speech", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -226,20 +300,21 @@ export async function speak(text: string) {
     const audio = new Audio(url);
     element = audio;
     current = { audio, url };
-
-    audio.addEventListener("ended", () => {
-      if (current?.audio === audio) releaseCurrent();
-    });
+    releaseWhenEnded(audio);
 
     // Already closed above, well before the first syllable.
     await audio.play();
   } catch (error) {
+    // Either explicitly cancelled (stopSpeaking aborts this controller
+    // regardless of which path was taken) or superseded by a newer attempt
+    // that has already taken over `current` — either way, that path already
+    // owns the mic state, so leave it alone.
     if (controller.signal.aborted) return;
     if (inFlight === controller) inFlight = null;
     // A failed synthesis must not leave the mic closed forever. Only clean up
     // if a later utterance hasn't already superseded ours.
     if (element && current?.audio === element) releaseCurrent();
-    // The mic was closed before the fetch even started, but there's no
+    // The mic was closed before the request even started, but there's no
     // `current` for releaseCurrent() to tear down if synthesis failed before
     // playback began — reopen explicitly in that case.
     else if (inFlight === null) setAudible(false);
