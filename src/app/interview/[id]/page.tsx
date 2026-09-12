@@ -6,6 +6,7 @@ import Editor from "@monaco-editor/react";
 import { getProblem } from "@/lib/problems";
 import type { ExecutionResult } from "@/lib/execute";
 import { Button, DifficultyBadge, Logo } from "@/components/ui";
+import { formatClock, timerConfigFromSearch, type TimerConfig } from "@/lib/timer";
 import {
   isInterviewerSpeaking,
   isMicrophoneRecordingSupported,
@@ -38,6 +39,15 @@ function noSubscription() {
 
 function unsupported() {
   return false;
+}
+
+/** The query string never changes during a mounted interview, so read it once. */
+function getSearchSnapshot() {
+  return window.location.search;
+}
+
+function getSearchServerSnapshot() {
+  return "";
 }
 
 /**
@@ -85,6 +95,13 @@ export default function InterviewPage({
   // The utterance in progress, before it's a finished message.
   const [partial, setPartial] = useState("");
   const [demoReason, setDemoReason] = useState<string | null>(null);
+  // Read from the URL the problem picker built (?timer=strict&minutes=N);
+  // defaults to a free count-up clock when the interview was opened directly.
+  const search = useSyncExternalStore(noSubscription, getSearchSnapshot, getSearchServerSnapshot);
+  const timerConfig: TimerConfig = timerConfigFromSearch(search);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const sessionStart = useRef(Date.now());
+  const autoSubmitted = useRef(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const greeted = useRef(false);
   // The editor contents Alex has already commented on, so an idle review only
@@ -97,6 +114,28 @@ export default function InterviewPage({
   const sendMessageRef = useRef<(text: string) => void>(() => {});
 
   useEffect(() => stopSpeaking, []);
+
+  // Ticks off wall-clock time rather than accumulating +1 each interval, so a
+  // throttled background tab still reports the real elapsed time on return.
+  useEffect(() => {
+    const tick = () => setElapsedSeconds(Math.floor((Date.now() - sessionStart.current) / 1000));
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const remainingSeconds =
+    timerConfig.mode === "strict" ? timerConfig.minutes * 60 - elapsedSeconds : null;
+
+  // Strict mode enforces itself: once the clock hits zero the session ends,
+  // no separate "are you sure" step, matching a real proctored time limit.
+  useEffect(() => {
+    if (remainingSeconds === null || remainingSeconds > 0) return;
+    if (autoSubmitted.current || submitting) return;
+    autoSubmitted.current = true;
+    void submitInterview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remainingSeconds]);
 
   useEffect(() => {
     if (!problem || !micSupported || !micOn) return;
@@ -277,9 +316,32 @@ export default function InterviewPage({
           <span className="font-medium text-sm truncate">{problem.title}</span>
           <DifficultyBadge level={problem.difficulty} />
         </div>
-        <Button variant="danger" size="sm" onClick={submitInterview} disabled={submitting}>
-          {submitting ? "Submitting…" : "End & Submit"}
-        </Button>
+        <div className="flex items-center gap-3">
+          {timerConfig.mode === "strict" ? (
+            <span
+              title="Strict mode: the interview auto-submits when this reaches 0:00."
+              className={`text-xs font-mono px-2.5 py-1 rounded-full border tabular-nums ${
+                remainingSeconds !== null && remainingSeconds <= 60
+                  ? "border-danger text-danger bg-danger-soft animate-pulse-dot"
+                  : remainingSeconds !== null && remainingSeconds <= timerConfig.minutes * 12
+                    ? "border-warning text-warning bg-warning-soft"
+                    : "border-border-strong text-muted"
+              }`}
+            >
+              {formatClock(Math.max(0, remainingSeconds ?? 0))} left
+            </span>
+          ) : (
+            <span
+              title="Free timer: tracks elapsed time with no cutoff."
+              className="text-xs font-mono px-2.5 py-1 rounded-full border border-border-strong text-muted tabular-nums"
+            >
+              {formatClock(elapsedSeconds)} elapsed
+            </span>
+          )}
+          <Button variant="danger" size="sm" onClick={submitInterview} disabled={submitting}>
+            {submitting ? "Submitting…" : "End & Submit"}
+          </Button>
+        </div>
       </header>
 
       <main className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,1fr)] gap-4 p-4">
