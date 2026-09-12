@@ -23,7 +23,7 @@ export async function generateText(
   if (!client) return null;
 
   const response = await client.models.generateContent({
-    model: "gemini-2.5-flash",
+    model: "gemini-3.6-flash",
     contents: history.map((turn) => ({
       role: turn.role,
       parts: [{ text: turn.text }],
@@ -42,7 +42,7 @@ export async function generateJson<T>(
   if (!client) return null;
 
   const response = await client.models.generateContent({
-    model: "gemini-2.5-flash",
+    model: "gemini-3.6-flash",
     contents: history.map((turn) => ({
       role: turn.role,
       parts: [{ text: turn.text }],
