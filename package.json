@@ -2,27 +2,39 @@
   "name": "hackky",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "speech:dev": "tsx watch speech-server.ts",
+    "speech:build": "tsc -p tsconfig.server.json",
+    "speech:start": "node dist-server/speech-server.js",
+    "speech:typecheck": "tsc -p tsconfig.server.json --noEmit"
   },
   "dependencies": {
+    "@elevenlabs/elevenlabs-js": "^2.68.0",
     "@google/genai": "^2.22.0",
     "@monaco-editor/react": "^4.7.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
     "next": "16.3.5",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.5",
     "tailwindcss": "^4",
+    "tsx": "^4.23.13",
     "typescript": "^5"
   }
 }
