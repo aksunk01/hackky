@@ -52,12 +52,48 @@ export function startListening(
   return () => recognition.stop();
 }
 
-export function speak(text: string) {
+let currentAudio: HTMLAudioElement | null = null;
+
+function speakWithBrowser(text: string, rate: number) {
   if (!isSpeechSynthesisSupported()) return;
   window.speechSynthesis.cancel();
-  window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.rate = rate;
+  window.speechSynthesis.speak(utterance);
+}
+
+async function speakWithElevenLabs(text: string, rate: number): Promise<boolean> {
+  try {
+    const res = await fetch("/api/speech", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok) return false;
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    audio.playbackRate = rate;
+    audio.onended = () => URL.revokeObjectURL(url);
+    currentAudio = audio;
+    await audio.play();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function speak(text: string, rate = 1.25) {
+  stopSpeaking();
+  const usedElevenLabs = await speakWithElevenLabs(text, rate);
+  if (!usedElevenLabs) speakWithBrowser(text, rate);
 }
 
 export function stopSpeaking() {
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio = null;
+  }
   if (isSpeechSynthesisSupported()) window.speechSynthesis.cancel();
 }
