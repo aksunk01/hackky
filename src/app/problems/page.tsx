@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type { Problem } from "@/lib/problems";
 import { DifficultyBadge, SiteHeader } from "@/components/ui";
+import { Input } from "@/components/ui/input";
 import {
   DEFAULT_STRICT_MINUTES,
   DEV_STRICT_MINUTES,
@@ -154,13 +155,13 @@ export default function ProblemsPage() {
             >
               &#128269;
             </span>
-            <input
+            <Input
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search by title or topic..."
               aria-label="Search problems"
-              className="w-full rounded-full border border-border-strong bg-card pl-11 pr-4 py-2.5 text-sm outline-none focus:border-accent transition-colors"
+              className="w-full rounded-full pl-11 pr-4 py-2.5"
             />
           </div>
 

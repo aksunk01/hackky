@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { SiteHeader } from "@/components/ui";
+import { SiteHeader, UnavailableNotice } from "@/components/ui";
 import { getCurrentUser } from "@/lib/auth";
 import { listSessions } from "@/lib/interview-sessions";
 import { bandFor } from "@/lib/grading";
@@ -15,10 +15,10 @@ export default async function SessionsPage() {
     return (
       <>
         <SiteHeader />
-        <main className="flex-1 max-w-3xl w-full mx-auto px-6 py-16">
-          <h1 className="text-2xl font-bold mb-4">Interview History</h1>
-          <p className="text-danger">History is unavailable. Check the Firestore connection and refresh this page.</p>
-        </main>
+        <UnavailableNotice
+          title="Interview History"
+          message="History is unavailable. Check the Firestore connection and refresh this page."
+        />
       </>
     );
   }

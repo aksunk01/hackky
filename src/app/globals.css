@@ -1,4 +1,8 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
 
 :root {
   --background: #f7f7f8;
@@ -23,6 +27,27 @@
   --danger-soft: rgba(220, 38, 38, 0.1);
 
   --shadow-color: 220 15% 10%;
+
+  /*
+   * shadcn/ui's generated components (Button, Card, Input, DropdownMenu, ...)
+   * expect this token set. Rather than introducing a second, conflicting
+   * palette, every one aliases back to the tokens above so shadcn components
+   * render in this app's existing brand colors and stay dark-mode-aware for
+   * free through that indirection.
+   */
+  --radius: 0.75rem;
+  --primary: var(--accent);
+  --primary-foreground: var(--accent-foreground);
+  --secondary: var(--subtle);
+  --secondary-foreground: var(--foreground);
+  --muted-foreground: var(--muted);
+  --destructive: var(--danger);
+  --destructive-foreground: #ffffff;
+  --popover: var(--card);
+  --popover-foreground: var(--foreground);
+  --card-foreground: var(--foreground);
+  --input: var(--border-strong);
+  --ring: var(--accent);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -74,6 +99,25 @@
 
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+
+  /* shadcn token aliases (see :root above) */
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-card-foreground: var(--card-foreground);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
 }
 
 * {
