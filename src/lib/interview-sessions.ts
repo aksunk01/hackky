@@ -1,7 +1,6 @@
 import "server-only";
 
-import type { RowDataPacket } from "mysql2";
-import { getPool } from "@/lib/mysql";
+import { getDb } from "@/lib/firestore";
 import {
   normalizeEvaluation,
   type ChatTurn,
@@ -10,27 +9,26 @@ import {
   type SessionSummary,
 } from "@/lib/interview-session-types";
 
-type SummaryRow = RowDataPacket & {
-  id: string;
-  problem_title: string;
-  overall_score: number;
-  tests_passed: number;
-  tests_total: number;
-  completed_at: string;
-};
+const COLLECTION = "interview_sessions";
 
-type SessionRow = SummaryRow & {
-  problem_id: string;
-  transcript_json: ChatTurn[] | string;
-  final_code: string;
-  evaluation_json: unknown;
-  mocked: number;
-  started_at: string;
+type SessionDoc = {
+  ownerId: string;
+  problemId: string;
+  problemTitle: string;
+  transcript: ChatTurn[];
+  finalCode: string;
+  evaluation: Evaluation;
+  overallScore: number;
+  testsPassed: number;
+  testsTotal: number;
+  mocked: boolean;
+  startedAt: string;
+  completedAt: string;
 };
 
 export type CompletedSessionInput = {
   id: string;
-  ownerId: Buffer;
+  ownerId: string;
   problemId: string;
   problemTitle: string;
   transcript: ChatTurn[];
@@ -44,52 +42,40 @@ export type CompletedSessionInput = {
 
 export class SessionConflictError extends Error {}
 
-function utcIso(value: string): string {
-  return new Date(value.replace(" ", "T") + "Z").toISOString();
-}
-
-function jsonValue<T>(value: T | string): T {
-  return typeof value === "string" ? (JSON.parse(value) as T) : value;
-}
-
-function toSummary(row: SummaryRow): SessionSummary {
+function toSummary(id: string, doc: SessionDoc): SessionSummary {
   return {
-    id: row.id,
-    problemTitle: row.problem_title,
-    overallScore: row.overall_score,
-    testsPassed: row.tests_passed,
-    testsTotal: row.tests_total,
-    completedAt: utcIso(row.completed_at),
+    id,
+    problemTitle: doc.problemTitle,
+    overallScore: doc.overallScore,
+    testsPassed: doc.testsPassed,
+    testsTotal: doc.testsTotal,
+    completedAt: doc.completedAt,
   };
 }
 
-export async function listSessions(ownerId: Buffer): Promise<SessionSummary[]> {
-  const [rows] = await getPool().execute<SummaryRow[]>(
-    `SELECT id, problem_title, overall_score, tests_passed, tests_total, completed_at
-     FROM interview_sessions WHERE owner_id = ?
-     ORDER BY completed_at DESC, id DESC`,
-    [ownerId]
-  );
-  return rows.map(toSummary);
+export async function listSessions(ownerId: string): Promise<SessionSummary[]> {
+  const snapshot = await getDb()
+    .collection(COLLECTION)
+    .where("ownerId", "==", ownerId)
+    .get();
+  return snapshot.docs
+    .map((doc) => toSummary(doc.id, doc.data() as SessionDoc))
+    .sort((a, b) => (a.completedAt < b.completedAt ? 1 : a.completedAt > b.completedAt ? -1 : 0));
 }
 
-export async function getSession(id: string, ownerId: Buffer): Promise<InterviewSession | null> {
-  const [rows] = await getPool().execute<SessionRow[]>(
-    `SELECT id, problem_id, problem_title, transcript_json, final_code, evaluation_json,
-            overall_score, tests_passed, tests_total, mocked, started_at, completed_at
-     FROM interview_sessions WHERE id = ? AND owner_id = ?`,
-    [id, ownerId]
-  );
-  const row = rows[0];
-  if (!row) return null;
+export async function getSession(id: string, ownerId: string): Promise<InterviewSession | null> {
+  const snapshot = await getDb().collection(COLLECTION).doc(id).get();
+  if (!snapshot.exists) return null;
+  const doc = snapshot.data() as SessionDoc;
+  if (doc.ownerId !== ownerId) return null;
   return {
-    ...toSummary(row),
-    problemId: row.problem_id,
-    transcript: jsonValue<ChatTurn[]>(row.transcript_json),
-    finalCode: row.final_code,
-    evaluation: normalizeEvaluation(jsonValue<unknown>(row.evaluation_json)),
-    mocked: Boolean(row.mocked),
-    startedAt: utcIso(row.started_at),
+    ...toSummary(snapshot.id, doc),
+    problemId: doc.problemId,
+    transcript: doc.transcript,
+    finalCode: doc.finalCode,
+    evaluation: normalizeEvaluation(doc.evaluation),
+    mocked: doc.mocked,
+    startedAt: doc.startedAt,
   };
 }
 
@@ -108,34 +94,29 @@ export function matchesSubmission(
 }
 
 export async function saveCompletedSession(input: CompletedSessionInput): Promise<void> {
-  const startedAt = new Date(input.startedAt);
-  const startedAtSql = startedAt.toISOString().slice(0, 23).replace("T", " ");
+  const docRef = getDb().collection(COLLECTION).doc(input.id);
+  const doc: SessionDoc = {
+    ownerId: input.ownerId,
+    problemId: input.problemId,
+    problemTitle: input.problemTitle,
+    transcript: input.transcript,
+    finalCode: input.finalCode,
+    evaluation: input.evaluation,
+    overallScore: input.evaluation.overall,
+    testsPassed: input.testsPassed,
+    testsTotal: input.testsTotal,
+    mocked: input.mocked,
+    startedAt: input.startedAt,
+    completedAt: new Date().toISOString(),
+  };
   try {
-    await getPool().execute(
-      `INSERT INTO interview_sessions
-       (id, owner_id, problem_id, problem_title, transcript_json, final_code,
-        evaluation_json, overall_score, tests_passed, tests_total, mocked, started_at, completed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(3))`,
-      [
-        input.id,
-        input.ownerId,
-        input.problemId,
-        input.problemTitle,
-        JSON.stringify(input.transcript),
-        input.finalCode,
-        JSON.stringify(input.evaluation),
-        input.evaluation.overall,
-        input.testsPassed,
-        input.testsTotal,
-        input.mocked ? 1 : 0,
-        startedAtSql,
-      ]
-    );
+    await docRef.create(doc as unknown as FirebaseFirestore.DocumentData);
   } catch (error) {
-    if ((error as { code?: string }).code !== "ER_DUP_ENTRY") throw error;
+    if ((error as { code?: number }).code !== 6 /* ALREADY_EXISTS */) throw error;
     const existing = await getSession(input.id, input.ownerId);
     if (!existing || !matchesSubmission(existing, input.problemId, input.finalCode, input.transcript)) {
       throw new SessionConflictError("This report ID belongs to another submission.");
     }
   }
 }
+

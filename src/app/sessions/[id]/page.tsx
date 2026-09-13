@@ -1,26 +1,27 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { SiteHeader } from "@/components/ui";
-import { getOwnerId } from "@/lib/owner-cookie";
+import { getCurrentUser } from "@/lib/auth";
 import { getSession } from "@/lib/interview-sessions";
 import { bandFor, bands, dimensions } from "@/lib/grading";
 import DownloadReport from "./download-report";
 
 export default async function SavedReportPage({ params }: PageProps<"/sessions/[id]">) {
   const { id } = await params;
-  const ownerId = await getOwnerId();
-  if (!ownerId || !/^[0-9a-f-]{36}$/i.test(id)) notFound();
+  const user = await getCurrentUser();
+  if (!user) redirect("/login");
+  if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
 
   let session;
   try {
-    session = await getSession(id, ownerId);
+    session = await getSession(id, user.uid);
   } catch {
     return (
       <>
         <SiteHeader />
         <main className="flex-1 max-w-4xl w-full mx-auto px-6 py-16">
           <h1 className="text-2xl font-bold mb-4">Report unavailable</h1>
-          <p className="text-danger">Could not load this report. Check the MySQL connection and refresh this page.</p>
+          <p className="text-danger">Could not load this report. Check the Firestore connection and refresh this page.</p>
         </main>
       </>
     );
@@ -69,7 +70,7 @@ export default async function SavedReportPage({ params }: PageProps<"/sessions/[
 
       {session.mocked && (
         <p className="rounded-lg border border-warning bg-warning-soft px-4 py-3 text-sm text-warning">
-          Demo-mode grading: Gemini was unavailable, so only correctness (from the test run) is scored. The other areas are marked not assessed.
+          Demo-mode grading: the AI grader was unavailable, so only correctness (from the test run) is scored. The other areas are marked not assessed.
         </p>
       )}
 

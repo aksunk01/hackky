@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { problems, type Problem } from "@/lib/problems";
+import type { Problem } from "@/lib/problems";
 import { DifficultyBadge, SiteHeader } from "@/components/ui";
 import {
   DEFAULT_STRICT_MINUTES,
@@ -23,12 +23,21 @@ const difficultyChipTone: Record<Problem["difficulty"], string> = {
 };
 
 export default function ProblemsPage() {
+  const [problems, setProblems] = useState<Problem[] | null>(null);
+  const [loadError, setLoadError] = useState(false);
   const [query, setQuery] = useState("");
   const [activeDifficulties, setActiveDifficulties] = useState<Problem["difficulty"][]>([]);
   const [timerMode, setTimerMode] = useState<TimerMode>("countup");
   const [strictMinutes, setStrictMinutes] = useState(DEFAULT_STRICT_MINUTES);
 
-  const timerQuery = timerConfigToQuery({ mode: timerMode, minutes: strictMinutes });
+  useEffect(() => {
+    fetch("/api/problems")
+      .then((res) => (res.ok ? res.json() : Promise.reject()))
+      .then((data: Problem[]) => setProblems(data))
+      .catch(() => setLoadError(true));
+  }, []);
+
+  const linkQuery = timerConfigToQuery({ mode: timerMode, minutes: strictMinutes });
 
   function toggleDifficulty(d: Problem["difficulty"]) {
     setActiveDifficulties((prev) =>
@@ -38,14 +47,14 @@ export default function ProblemsPage() {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return problems.filter((p) => {
+    return (problems ?? []).filter((p) => {
       const matchesQuery =
         !q || p.title.toLowerCase().includes(q) || p.tags.toLowerCase().includes(q);
       const matchesDifficulty =
         activeDifficulties.length === 0 || activeDifficulties.includes(p.difficulty);
       return matchesQuery && matchesDifficulty;
     });
-  }, [query, activeDifficulties]);
+  }, [problems, query, activeDifficulties]);
 
   const hasFilters = query.trim() !== "" || activeDifficulties.length > 0;
 
@@ -56,7 +65,9 @@ export default function ProblemsPage() {
       <div className="max-w-3xl w-full mx-auto px-6 py-14 sm:py-16 flex-1">
         <h1 className="text-2xl sm:text-3xl font-bold tracking-tight mb-1">Choose a Problem</h1>
         <p className="text-muted mb-6">
-          {problems.length} problem{problems.length === 1 ? "" : "s"} available — pick one to begin your interview.
+          {problems === null
+            ? "Loading problems…"
+            : `${problems.length} problem${problems.length === 1 ? "" : "s"} available — pick one to begin your interview.`}
         </p>
 
         <div className="rounded-2xl border border-border bg-card p-4 sm:p-5 mb-6 flex flex-col gap-3">
@@ -188,16 +199,22 @@ export default function ProblemsPage() {
           </div>
         </div>
 
-        {filtered.length === 0 ? (
+        {loadError ? (
+          <div className="rounded-2xl border border-dashed border-danger px-5 py-10 text-center">
+            <p className="text-danger">Could not load problems. Refresh to try again.</p>
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-border-strong px-5 py-10 text-center">
-            <p className="text-muted">No problems match your filters.</p>
+            <p className="text-muted">
+              {problems === null ? "Loading…" : "No problems match your filters."}
+            </p>
           </div>
         ) : (
           <div className="flex flex-col gap-3">
             {filtered.map((p) => (
               <Link
                 key={p.id}
-                href={`/interview/${p.id}${timerQuery}`}
+                href={`/interview/${p.id}${linkQuery}`}
                 className="group flex items-center justify-between rounded-2xl border border-border bg-card px-5 py-4 transition-all hover:border-accent hover:shadow-md hover:-translate-y-0.5"
               >
                 <div className="flex flex-col gap-1.5">

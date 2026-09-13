@@ -3,8 +3,7 @@ import path from "node:path";
 import type { Problem, ValueType } from "../problems";
 import {
   CASE_MARKER,
-  COMPILE_TIMEOUT_MS,
-  EXEC_OPTIONS,
+  COMPILE_OPTIONS,
   type ExecutionResult,
   type TypedProblem,
   crashedResult,
@@ -141,7 +140,7 @@ export async function runJava(
       await execFileAsync(
         "javac",
         ["-d", classes, path.join(dir, "Solution.java"), path.join(dir, "Main.java")],
-        { timeout: COMPILE_TIMEOUT_MS, maxBuffer: EXEC_OPTIONS.maxBuffer }
+        COMPILE_OPTIONS
       );
     } catch (err) {
       return crashedResult(problem, errorText(err));

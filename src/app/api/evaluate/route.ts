@@ -1,10 +1,17 @@
 import { NextResponse } from "next/server";
 import { DEFAULT_LANGUAGE, isLanguage, languageLabel } from "@/lib/languages";
-import { getProblem } from "@/lib/problems";
+import { getProblem } from "@/lib/problems-store";
 import { runCode } from "@/lib/execute";
-import { generateJson } from "@/lib/gemini";
-import { getOwnerId } from "@/lib/owner-cookie";
-import { describeDatabaseError } from "@/lib/mysql";
+import {
+  aiProviderLabel,
+  aiProviderToApiKeyProvider,
+  DEFAULT_AI_PROVIDER,
+  generateJson,
+  isAiProvider,
+} from "@/lib/ai";
+import { getCurrentUser } from "@/lib/auth";
+import { getDecryptedApiKey } from "@/lib/users";
+import { describeDatabaseError } from "@/lib/firestore";
 import {
   getSession,
   matchesSubmission,
@@ -60,10 +67,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   }
 
-  const ownerId = await getOwnerId();
-  if (!ownerId) {
-    return NextResponse.json({ error: "Interview owner was not initialized. Refresh and retry." }, { status: 401 });
+  const user = await getCurrentUser();
+  if (!user) {
+    return NextResponse.json({ error: "Not signed in. Log in and retry." }, { status: 401 });
   }
+  const ownerId = user.uid;
 
   const bodyText = await request.text();
   if (bodyText.length > MAX_BODY_CHARS) {
@@ -77,7 +85,7 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: "Invalid JSON request." }, { status: 400 });
   }
-  const { id, problemId, code, history, startedAt, language, runs } = body;
+  const { id, problemId, code, history, startedAt, language, runs, provider } = body;
   if (
     typeof id !== "string" || !UUID_PATTERN.test(id) ||
     typeof problemId !== "string" ||
@@ -93,12 +101,13 @@ export async function POST(request: Request) {
   ) {
     return NextResponse.json({ error: "Invalid interview submission." }, { status: 400 });
   }
+  const aiProvider = isAiProvider(provider) ? provider : DEFAULT_AI_PROVIDER;
   const turns = history as ChatTurn[];
   if (turns.reduce((size, turn) => size + turn.text.length, 0) > MAX_TRANSCRIPT_CHARS) {
     return NextResponse.json({ error: "Transcript is too large to submit." }, { status: 413 });
   }
 
-  const problem = getProblem(problemId);
+  const problem = await getProblem(problemId);
   if (!problem) {
     return NextResponse.json({ error: "Unknown problem." }, { status: 404 });
   }
@@ -112,11 +121,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ id: existing.id });
     }
   } catch (error) {
-    console.error("MySQL report lookup failed:", describeDatabaseError(error));
-    return NextResponse.json({ error: "Report storage is unavailable. Check MySQL and retry." }, { status: 503 });
+    console.error("Firestore report lookup failed:", describeDatabaseError(error));
+    return NextResponse.json({ error: "Report storage is unavailable. Check Firestore and retry." }, { status: 503 });
   }
   const lang = isLanguage(language) ? language : DEFAULT_LANGUAGE;
-  const execResult = await runCode(lang, problem, code);
+  // Independent lookups: executing the candidate's code and decrypting their
+  // API key for the grader don't depend on each other.
+  const [execResult, userApiKey] = await Promise.all([
+    runCode(lang, problem, code),
+    getDecryptedApiKey(ownerId, aiProviderToApiKeyProvider(aiProvider)),
+  ]);
   const correctness = correctnessFromTests(execResult.passed, execResult.total, execResult.crashed);
   const fallback = buildFallbackEvaluation(correctness, turns);
   const runCount = typeof runs === "number" ? runs : null;
@@ -166,16 +180,19 @@ Return ONLY a JSON object with this exact shape:
   let evaluation = fallback;
   let mocked = true;
   try {
-    const generated = await generateJson<unknown>(systemInstruction, [
-      { role: "user", text: "Grade this interview now." },
-    ]);
+    const generated = await generateJson<unknown>(
+      aiProvider,
+      systemInstruction,
+      [{ role: "user", text: "Grade this interview now." }],
+      userApiKey
+    );
     const valid = validatedEvaluation(generated, correctness);
     if (valid) {
       evaluation = valid;
       mocked = false;
     }
   } catch (err) {
-    console.error("Gemini evaluate call failed, falling back to mock:", err);
+    console.error(`${aiProviderLabel(aiProvider)} evaluate call failed, falling back to mock:`, err);
   }
 
   const now = Date.now();
@@ -200,7 +217,7 @@ Return ONLY a JSON object with this exact shape:
     if (error instanceof SessionConflictError) {
       return NextResponse.json({ error: error.message }, { status: 409 });
     }
-    console.error("MySQL report save failed:", describeDatabaseError(error));
-    return NextResponse.json({ error: "Could not save the report. Check MySQL and retry this submission." }, { status: 503 });
+    console.error("Firestore report save failed:", describeDatabaseError(error));
+    return NextResponse.json({ error: "Could not save the report. Check Firestore and retry this submission." }, { status: 503 });
   }
 }

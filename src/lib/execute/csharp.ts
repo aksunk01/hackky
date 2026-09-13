@@ -3,8 +3,7 @@ import path from "node:path";
 import type { Problem, ValueType } from "../problems";
 import {
   CASE_MARKER,
-  COMPILE_TIMEOUT_MS,
-  EXEC_OPTIONS,
+  COMPILE_OPTIONS,
   type ExecutionResult,
   type TypedProblem,
   crashedResult,
@@ -129,10 +128,7 @@ ${blocks.join("\n")}
 
 /** Built against whichever SDK is installed, rather than a pinned version. */
 async function targetFramework(): Promise<string> {
-  const { stdout } = await execFileAsync("dotnet", ["--version"], {
-    timeout: COMPILE_TIMEOUT_MS,
-    maxBuffer: EXEC_OPTIONS.maxBuffer,
-  });
+  const { stdout } = await execFileAsync("dotnet", ["--version"], COMPILE_OPTIONS);
   const major = Number.parseInt(stdout.trim().split(".")[0] ?? "", 10);
   return Number.isInteger(major) && major >= 6 ? `net${major}.0` : "net8.0";
 }
@@ -175,7 +171,7 @@ export async function runCSharp(
       await execFileAsync(
         "dotnet",
         ["build", "solution.csproj", "-c", "Release", "-o", "out", "--nologo", "-v", "q"],
-        { cwd: dir, timeout: COMPILE_TIMEOUT_MS, maxBuffer: EXEC_OPTIONS.maxBuffer }
+        { cwd: dir, ...COMPILE_OPTIONS }
       );
     } catch (err) {
       return crashedResult(problem, errorText(err));

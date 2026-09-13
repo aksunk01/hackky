@@ -1,4 +1,5 @@
 import { ApiError, GoogleGenAI } from "@google/genai";
+import { createKeyedClientCache } from "@/lib/client-cache";
 
 /**
  * The free tier allows 20 generate_content requests *per day, per model*, and
@@ -16,17 +17,14 @@ const RETRYABLE_STATUSES = new Set([429, 500, 502, 503]);
 /** One retry. A quota wait is ~13s, and an interview reply can't stall forever. */
 const MAX_ATTEMPTS = 2;
 
-let cachedClient: GoogleGenAI | null = null;
-
-export function hasGeminiKey(): boolean {
-  return Boolean(process.env.GEMINI_API_KEY);
+export function hasGeminiKey(apiKey?: string | null): boolean {
+  return Boolean(apiKey);
 }
 
-function getClient(): GoogleGenAI | null {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return null;
-  if (!cachedClient) cachedClient = new GoogleGenAI({ apiKey });
-  return cachedClient;
+const cachedClientFor = createKeyedClientCache((apiKey: string) => new GoogleGenAI({ apiKey }));
+
+function getClient(apiKey?: string | null): GoogleGenAI | null {
+  return apiKey ? cachedClientFor(apiKey) : null;
 }
 
 export type ChatTurn = { role: "user" | "model"; text: string };
@@ -70,9 +68,10 @@ async function withRetry<T>(call: () => Promise<T>): Promise<T> {
 
 export async function generateText(
   systemInstruction: string,
-  history: ChatTurn[]
+  history: ChatTurn[],
+  apiKey?: string | null
 ): Promise<string | null> {
-  const client = getClient();
+  const client = getClient(apiKey);
   if (!client) return null;
 
   const response = await withRetry(() =>
@@ -91,9 +90,10 @@ export async function generateText(
 
 export async function generateJson<T>(
   systemInstruction: string,
-  history: ChatTurn[]
+  history: ChatTurn[],
+  apiKey?: string | null
 ): Promise<T | null> {
-  const client = getClient();
+  const client = getClient(apiKey);
   if (!client) return null;
 
   const response = await withRetry(() =>

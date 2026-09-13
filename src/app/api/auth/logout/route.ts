@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { ensureOwnerCookie } from "@/lib/owner-cookie";
+import { cookies } from "next/headers";
+import { SESSION_COOKIE } from "@/lib/session-cookie";
 
 export async function POST(request: Request) {
   const origin = request.headers.get("origin");
@@ -7,6 +8,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   }
 
-  await ensureOwnerCookie();
-  return NextResponse.json({ ready: true }, { headers: { "Cache-Control": "no-store" } });
+  (await cookies()).delete(SESSION_COOKIE);
+  return NextResponse.json({ ok: true });
 }
