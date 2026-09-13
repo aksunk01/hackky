@@ -5,9 +5,11 @@ import {
   MISSING_KEY_MESSAGE,
   STT_MODEL_ID,
 } from "@/lib/elevenlabs";
+import { getCurrentUserApiKey } from "@/lib/users";
 
 export async function POST(request: Request) {
-  const client = getClient();
+  const userApiKey = await getCurrentUserApiKey("elevenlabs");
+  const client = getClient(userApiKey);
   if (!client) {
     return NextResponse.json({ error: MISSING_KEY_MESSAGE }, { status: 503 });
   }

@@ -4,6 +4,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ButtonHTMLAttributes } from "react";
 
+export const textInputClass =
+  "w-full rounded-xl border border-border-strong bg-card px-4 py-2.5 text-sm outline-none focus:border-accent transition-colors";
+
 const buttonBase =
   "inline-flex items-center justify-center gap-2 rounded-full font-medium transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.97]";
 
@@ -71,6 +74,16 @@ export function DifficultyBadge({ level }: { level: string }) {
     <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${tone}`}>
       {level}
     </span>
+  );
+}
+
+/** Shared shell for "this page's data couldn't load" states, e.g. a Firestore outage. */
+export function UnavailableNotice({ title, message }: { title: string; message: string }) {
+  return (
+    <main className="flex-1 max-w-2xl w-full mx-auto px-6 py-16">
+      <h1 className="text-2xl font-bold mb-4">{title}</h1>
+      <p className="text-danger">{message}</p>
+    </main>
   );
 }
 
@@ -166,6 +179,14 @@ function UserMenu() {
           className="absolute right-0 top-full mt-2 w-56 rounded-xl border border-border bg-card shadow-lg py-1.5 z-10"
         >
           <div className="px-3.5 py-2 text-sm text-muted truncate border-b border-border">{email}</div>
+          <Link
+            href="/settings"
+            role="menuitem"
+            onClick={() => setOpen(false)}
+            className="block w-full text-left px-3.5 py-2 text-sm hover:bg-subtle transition-colors"
+          >
+            Settings
+          </Link>
           <button
             type="button"
             role="menuitem"

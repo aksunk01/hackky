@@ -6,9 +6,11 @@ import {
   TTS_MODEL_ID,
   VOICE_ID,
 } from "@/lib/elevenlabs";
+import { getCurrentUserApiKey } from "@/lib/users";
 
 async function synthesize(text: string): Promise<Response> {
-  const client = getClient();
+  const userApiKey = await getCurrentUserApiKey("elevenlabs");
+  const client = getClient(userApiKey);
   if (!client) {
     return NextResponse.json({ error: MISSING_KEY_MESSAGE }, { status: 503 });
   }

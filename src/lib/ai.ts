@@ -1,6 +1,7 @@
 import * as claude from "@/lib/claude";
 import * as gemini from "@/lib/gemini";
 import type { ChatTurn } from "@/lib/gemini";
+import type { ApiKeyProvider } from "@/lib/api-key-providers";
 
 export type { ChatTurn };
 export type AiProvider = "gemini" | "claude";
@@ -15,8 +16,13 @@ export function aiProviderLabel(provider: AiProvider): string {
   return provider === "claude" ? "Claude" : "Gemini";
 }
 
-export function hasProviderKey(provider: AiProvider): boolean {
-  return provider === "claude" ? claude.hasClaudeKey() : gemini.hasGeminiKey();
+/** Maps an interview AI provider to the settings key that stores a user's own key for it. */
+export function aiProviderToApiKeyProvider(provider: AiProvider): ApiKeyProvider {
+  return provider === "claude" ? "anthropic" : "gemini";
+}
+
+export function hasProviderKey(provider: AiProvider, apiKey?: string | null): boolean {
+  return provider === "claude" ? claude.hasClaudeKey(apiKey) : gemini.hasGeminiKey(apiKey);
 }
 
 export function isProviderQuotaError(provider: AiProvider, error: unknown): boolean {
@@ -26,21 +32,23 @@ export function isProviderQuotaError(provider: AiProvider, error: unknown): bool
 export function generateText(
   provider: AiProvider,
   systemInstruction: string,
-  history: ChatTurn[]
+  history: ChatTurn[],
+  apiKey?: string | null
 ): Promise<string | null> {
   return provider === "claude"
-    ? claude.generateText(systemInstruction, history)
-    : gemini.generateText(systemInstruction, history);
+    ? claude.generateText(systemInstruction, history, apiKey)
+    : gemini.generateText(systemInstruction, history, apiKey);
 }
 
 export function generateJson<T>(
   provider: AiProvider,
   systemInstruction: string,
-  history: ChatTurn[]
+  history: ChatTurn[],
+  apiKey?: string | null
 ): Promise<T | null> {
   return provider === "claude"
-    ? claude.generateJson<T>(systemInstruction, history)
-    : gemini.generateJson<T>(systemInstruction, history);
+    ? claude.generateJson<T>(systemInstruction, history, apiKey)
+    : gemini.generateJson<T>(systemInstruction, history, apiKey);
 }
 
 /** Builds the query string a problem link carries into the interview page. */

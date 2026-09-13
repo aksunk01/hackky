@@ -1,4 +1,5 @@
 import Anthropic, { APIError } from "@anthropic-ai/sdk";
+import { createKeyedClientCache } from "@/lib/client-cache";
 
 const MODEL = process.env.CLAUDE_MODEL ?? "claude-opus-5";
 
@@ -7,17 +8,14 @@ const RETRYABLE_STATUSES = new Set([429, 500, 502, 503]);
 /** One retry — an interview reply can't stall forever. */
 const MAX_ATTEMPTS = 2;
 
-let cachedClient: Anthropic | null = null;
-
-export function hasClaudeKey(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY);
+export function hasClaudeKey(apiKey?: string | null): boolean {
+  return Boolean(apiKey);
 }
 
-function getClient(): Anthropic | null {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
-  if (!cachedClient) cachedClient = new Anthropic({ apiKey });
-  return cachedClient;
+const cachedClientFor = createKeyedClientCache((apiKey: string) => new Anthropic({ apiKey }));
+
+function getClient(apiKey?: string | null): Anthropic | null {
+  return apiKey ? cachedClientFor(apiKey) : null;
 }
 
 export type ChatTurn = { role: "user" | "model"; text: string };
@@ -63,9 +61,10 @@ function textFromResponse(response: Anthropic.Message): string | null {
 
 export async function generateText(
   systemInstruction: string,
-  history: ChatTurn[]
+  history: ChatTurn[],
+  apiKey?: string | null
 ): Promise<string | null> {
-  const client = getClient();
+  const client = getClient(apiKey);
   if (!client) return null;
 
   const response = await withRetry(() =>
@@ -84,9 +83,10 @@ export async function generateText(
 
 export async function generateJson<T>(
   systemInstruction: string,
-  history: ChatTurn[]
+  history: ChatTurn[],
+  apiKey?: string | null
 ): Promise<T | null> {
-  const client = getClient();
+  const client = getClient(apiKey);
   if (!client) return null;
 
   const response = await withRetry(() =>

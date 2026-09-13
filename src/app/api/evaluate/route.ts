@@ -2,8 +2,15 @@ import { NextResponse } from "next/server";
 import { DEFAULT_LANGUAGE, isLanguage, languageLabel } from "@/lib/languages";
 import { getProblem } from "@/lib/problems-store";
 import { runCode } from "@/lib/execute";
-import { aiProviderLabel, DEFAULT_AI_PROVIDER, generateJson, isAiProvider } from "@/lib/ai";
+import {
+  aiProviderLabel,
+  aiProviderToApiKeyProvider,
+  DEFAULT_AI_PROVIDER,
+  generateJson,
+  isAiProvider,
+} from "@/lib/ai";
 import { getCurrentUser } from "@/lib/auth";
+import { getDecryptedApiKey } from "@/lib/users";
 import { describeDatabaseError } from "@/lib/firestore";
 import {
   getSession,
@@ -118,7 +125,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Report storage is unavailable. Check Firestore and retry." }, { status: 503 });
   }
   const lang = isLanguage(language) ? language : DEFAULT_LANGUAGE;
-  const execResult = await runCode(lang, problem, code);
+  // Independent lookups: executing the candidate's code and decrypting their
+  // API key for the grader don't depend on each other.
+  const [execResult, userApiKey] = await Promise.all([
+    runCode(lang, problem, code),
+    getDecryptedApiKey(ownerId, aiProviderToApiKeyProvider(aiProvider)),
+  ]);
   const correctness = correctnessFromTests(execResult.passed, execResult.total, execResult.crashed);
   const fallback = buildFallbackEvaluation(correctness, turns);
   const runCount = typeof runs === "number" ? runs : null;
@@ -168,9 +180,12 @@ Return ONLY a JSON object with this exact shape:
   let evaluation = fallback;
   let mocked = true;
   try {
-    const generated = await generateJson<unknown>(aiProvider, systemInstruction, [
-      { role: "user", text: "Grade this interview now." },
-    ]);
+    const generated = await generateJson<unknown>(
+      aiProvider,
+      systemInstruction,
+      [{ role: "user", text: "Grade this interview now." }],
+      userApiKey
+    );
     const valid = validatedEvaluation(generated, correctness);
     if (valid) {
       evaluation = valid;

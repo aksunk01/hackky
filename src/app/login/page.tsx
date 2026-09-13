@@ -4,13 +4,21 @@ import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   createUserWithEmailAndPassword,
+  getAdditionalUserInfo,
   GoogleAuthProvider,
   signInWithEmailAndPassword,
   signInWithPopup,
   type UserCredential,
 } from "firebase/auth";
 import { auth } from "@/lib/firebase-client";
-import { Button, Logo } from "@/components/ui";
+import { Button, Logo, textInputClass } from "@/components/ui";
+import {
+  API_KEY_PROVIDERS,
+  API_KEY_PROVIDER_META,
+  hasRequiredApiKeys,
+  type ApiKeyProvider,
+} from "@/lib/api-key-providers";
+import { patchSettings } from "@/lib/settings-client";
 
 const FRIENDLY_ERRORS: Record<string, string> = {
   "auth/invalid-email": "That email address doesn't look right.",
@@ -33,13 +41,20 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const next = searchParams.get("next") || "/problems";
 
+  const [step, setStep] = useState<"credentials" | "keys">("credentials");
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  async function establishSession(cred: UserCredential) {
+  const [keys, setKeys] = useState<Record<ApiKeyProvider, string>>(
+    () => Object.fromEntries(API_KEY_PROVIDERS.map((provider) => [provider, ""])) as Record<ApiKeyProvider, string>
+  );
+  const [keysError, setKeysError] = useState("");
+  const [keysBusy, setKeysBusy] = useState(false);
+
+  async function establishSession(cred: UserCredential, isNewUser: boolean) {
     const idToken = await cred.user.getIdToken();
     const res = await fetch("/api/auth/session", {
       method: "POST",
@@ -47,6 +62,11 @@ function LoginForm() {
       body: JSON.stringify({ idToken }),
     });
     if (!res.ok) throw new Error("Could not start your session. Try again.");
+    if (isNewUser) {
+      setBusy(false);
+      setStep("keys");
+      return;
+    }
     router.push(next);
     router.refresh();
   }
@@ -60,7 +80,7 @@ function LoginForm() {
         mode === "signin"
           ? await signInWithEmailAndPassword(auth, email, password)
           : await createUserWithEmailAndPassword(auth, email, password);
-      await establishSession(cred);
+      await establishSession(cred, mode === "signup");
     } catch (err) {
       setError(friendlyError(err));
       setBusy(false);
@@ -72,11 +92,83 @@ function LoginForm() {
     setBusy(true);
     try {
       const cred = await signInWithPopup(auth, new GoogleAuthProvider());
-      await establishSession(cred);
+      const isNewUser = getAdditionalUserInfo(cred)?.isNewUser ?? false;
+      await establishSession(cred, isNewUser);
     } catch (err) {
       setError(friendlyError(err));
       setBusy(false);
     }
+  }
+
+  async function saveKeysAndContinue(e: React.FormEvent) {
+    e.preventDefault();
+    setKeysError("");
+    const filled = Object.fromEntries(
+      API_KEY_PROVIDERS.map((provider) => [provider, Boolean(keys[provider].trim())])
+    ) as Record<ApiKeyProvider, boolean>;
+    if (!hasRequiredApiKeys(filled)) {
+      setKeysError("An ElevenLabs key plus either a Gemini or an Anthropic key are required — this app has no shared fallback key.");
+      return;
+    }
+    setKeysBusy(true);
+    try {
+      const apiKeys = Object.fromEntries(
+        API_KEY_PROVIDERS.filter((provider) => keys[provider].trim()).map((provider) => [provider, keys[provider].trim()])
+      );
+      await patchSettings({ apiKeys });
+      router.push(next);
+      router.refresh();
+    } catch (err) {
+      setKeysError(err instanceof Error ? err.message : "Could not save your keys.");
+      setKeysBusy(false);
+    }
+  }
+
+  if (step === "keys") {
+    return (
+      <main className="flex-1 flex items-center justify-center px-6 py-16">
+        <div className="w-full max-w-sm">
+          <div className="mb-8 flex justify-center">
+            <Logo />
+          </div>
+          <div className="rounded-2xl border border-border bg-card p-6 sm:p-8">
+            <h1 className="text-lg font-semibold">Add your AI API keys</h1>
+            <p className="mt-1 text-sm text-muted">
+              This app doesn&apos;t provide shared API keys — bring your own. You need an ElevenLabs key for voice,
+              plus either a Gemini or an Anthropic key for the interview itself. You can update these later in
+              Settings.
+            </p>
+            <form onSubmit={saveKeysAndContinue} className="mt-5 flex flex-col gap-3">
+              {API_KEY_PROVIDERS.map((provider) => (
+                <label key={provider} className="flex flex-col gap-1.5">
+                  <span className="text-sm font-medium">
+                    {API_KEY_PROVIDER_META[provider].label}
+                    {provider === "gemini" && <span className="text-muted font-normal"> (or Anthropic)</span>}
+                    {provider === "anthropic" && <span className="text-muted font-normal"> (or Gemini)</span>}
+                  </span>
+                  <input
+                    type="password"
+                    value={keys[provider]}
+                    onChange={(e) => setKeys((prev) => ({ ...prev, [provider]: e.target.value }))}
+                    placeholder="Paste API key…"
+                    autoComplete="off"
+                    required={provider === "elevenlabs"}
+                    className={textInputClass}
+                  />
+                  <span className="text-xs text-muted">{API_KEY_PROVIDER_META[provider].hint}</span>
+                </label>
+              ))}
+
+              {keysError && <p className="text-sm text-danger">{keysError}</p>}
+
+              <Button type="submit" disabled={keysBusy} className="w-full mt-1">
+                {keysBusy ? "Saving…" : "Save keys & continue"}
+              </Button>
+            </form>
+          </div>
+        </div>
+      </main>
+    );
   }
 
   return (
@@ -116,7 +208,7 @@ function LoginForm() {
               placeholder="Email"
               required
               autoComplete="email"
-              className="w-full rounded-xl border border-border-strong bg-card px-4 py-2.5 text-sm outline-none focus:border-accent transition-colors"
+              className={textInputClass}
             />
             <input
               type="password"
@@ -126,8 +218,15 @@ function LoginForm() {
               required
               minLength={6}
               autoComplete={mode === "signin" ? "current-password" : "new-password"}
-              className="w-full rounded-xl border border-border-strong bg-card px-4 py-2.5 text-sm outline-none focus:border-accent transition-colors"
+              className={textInputClass}
             />
+
+            {mode === "signup" && (
+              <p className="text-xs text-muted">
+                Next, you&apos;ll be asked for your own ElevenLabs key plus either a Gemini or an Anthropic key — this
+                app has no shared fallback key.
+              </p>
+            )}
 
             {error && <p className="text-sm text-danger">{error}</p>}
 

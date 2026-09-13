@@ -10,6 +10,8 @@ import { Button, DifficultyBadge, Logo } from "@/components/ui";
 import { RunResultPanel } from "@/components/run-result";
 import { formatClock, timerConfigFromSearch, type TimerConfig } from "@/lib/timer";
 import { aiProviderFromSearch, aiProviderLabel, type AiProvider } from "@/lib/ai";
+import { hasRequiredApiKeys, type ApiKeyProvider } from "@/lib/api-key-providers";
+import type { UserSettings } from "@/lib/users";
 import { looksRandom } from "@/lib/noise";
 import {
   isInterviewerSpeaking,
@@ -44,6 +46,7 @@ type SubmissionSnapshot = {
   code: string;
   language: Language;
   provider: AiProvider;
+  runs: number;
   startedAt: string;
 };
 
@@ -332,8 +335,45 @@ export default function InterviewPage({
     result?: ExecutionResult | null;
     activity?: ActivitySinceLastCheck;
   }) => Promise<void>>(async () => {});
+  // Re-pointed every render (see sendMessageRef/askInterviewerRef above) so
+  // leaving the page — a client-side navigation that unmounts this component,
+  // or an actual tab close/refresh — always finalizes against the latest
+  // code/messages instead of whatever was current when the listener was set up.
+  const finalizeOnLeaveRef = useRef<() => void>(() => {});
 
-  useEffect(() => stopSpeaking, []);
+  useEffect(() => {
+    finalizeOnLeaveRef.current = () => {
+      // Nothing to salvage if the session never properly started (still
+      // being auth/key-checked) or a submission is already underway.
+      if (!authReady || !problem || submissionRef.current) return;
+      const snapshot = buildSnapshot();
+      submissionRef.current = snapshot;
+      stopSpeaking();
+      // `keepalive` lets the request outlive an actual page unload (tab
+      // close/refresh); for an in-app navigation the tab stays alive anyway.
+      void fetch("/api/evaluate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(snapshot),
+        keepalive: true,
+      }).catch(() => {});
+    };
+  });
+
+  useEffect(() => {
+    return () => {
+      finalizeOnLeaveRef.current();
+      stopSpeaking();
+    };
+  }, []);
+
+  useEffect(() => {
+    function handlePageHide() {
+      finalizeOnLeaveRef.current();
+    }
+    window.addEventListener("pagehide", handlePageHide);
+    return () => window.removeEventListener("pagehide", handlePageHide);
+  }, []);
 
   useEffect(() => {
     startedAtRef.current ??= new Date().toISOString();
@@ -343,13 +383,30 @@ export default function InterviewPage({
 
   async function checkAuth() {
     setAuthError("");
+    const currentPath = window.location.pathname + window.location.search;
     try {
       const res = await fetch("/api/auth/me");
       if (res.status === 401) {
-        router.push(`/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+        router.push(`/login?next=${encodeURIComponent(currentPath)}`);
         return;
       }
       if (!res.ok) throw new Error("Auth check failed.");
+
+      const settingsRes = await fetch("/api/settings");
+      if (settingsRes.status === 401) {
+        router.push(`/login?next=${encodeURIComponent(currentPath)}`);
+        return;
+      }
+      if (!settingsRes.ok) throw new Error("Settings check failed.");
+      const settings = (await settingsRes.json()) as UserSettings;
+      const isSet = Object.fromEntries(
+        Object.entries(settings.apiKeys).map(([provider, key]) => [provider, key.isSet])
+      ) as Record<ApiKeyProvider, boolean>;
+      if (!hasRequiredApiKeys(isSet)) {
+        router.push(`/settings?next=${encodeURIComponent(currentPath)}`);
+        return;
+      }
+
       setAuthReady(true);
     } catch {
       setAuthError("Your session could not be verified. Retry, or sign in again.");
@@ -626,20 +683,26 @@ export default function InterviewPage({
     }
   }
 
+  function buildSnapshot(): SubmissionSnapshot {
+    return (
+      submissionRef.current ?? {
+        id: crypto.randomUUID(),
+        problemId: problem!.id,
+        history: messages.map(({ role, text }) => ({ role, text })),
+        code,
+        language,
+        provider: aiProvider,
+        runs: runCountRef.current,
+        startedAt: startedAtRef.current ?? new Date().toISOString(),
+      }
+    );
+  }
+
   async function submitInterview() {
     if (submittingRef.current || busy.current || runningRef.current || partial.trim() || !authReady) return;
     submittingRef.current = true;
     if (deadlineReachedRef.current) autoSubmitted.current = true;
-    const snapshot = submissionRef.current ?? {
-      id: crypto.randomUUID(),
-      problemId: problem!.id,
-      history: messages.map(({ role, text }) => ({ role, text })),
-      code,
-      language,
-      provider: aiProvider,
-      runs: runCountRef.current,
-      startedAt: startedAtRef.current ?? new Date().toISOString(),
-    };
+    const snapshot = buildSnapshot();
     submissionRef.current = snapshot;
     setSubmissionLocked(true);
     setSubmitError("");

@@ -9,6 +9,7 @@ import { getProblem } from "@/lib/problems-store";
 import type { Problem } from "@/lib/problems";
 import {
   aiProviderLabel,
+  aiProviderToApiKeyProvider,
   DEFAULT_AI_PROVIDER,
   generateText,
   isAiProvider,
@@ -19,6 +20,7 @@ import {
 import { mentionsComplexity } from "@/lib/grading";
 import type { ExecutionResult } from "@/lib/execute";
 import { looksRandom } from "@/lib/noise";
+import { getCurrentUserApiKey } from "@/lib/users";
 
 const MOCK_REPLIES = [
   "Sounds good — before you dive into code, can you walk me through your approach and its time complexity?",
@@ -265,7 +267,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "problemId is required." }, { status: 400 });
   }
 
-  const problem = await getProblem(problemId);
+  // Independent lookups: the problem fetch and the candidate's own API key
+  // for this provider don't depend on each other, so run them concurrently.
+  const [problem, userApiKey] = await Promise.all([
+    getProblem(problemId),
+    getCurrentUserApiKey(aiProviderToApiKeyProvider(aiProvider)),
+  ]);
   if (!problem) {
     return NextResponse.json({ error: "Unknown problem." }, { status: 404 });
   }
@@ -307,7 +314,8 @@ export async function POST(request: Request) {
         timer,
         turns
       ),
-      contents
+      contents,
+      userApiKey
     );
     if (reply) {
       // A periodic check that found nothing wrong stays silent rather than
