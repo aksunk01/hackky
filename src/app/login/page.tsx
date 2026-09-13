@@ -11,7 +11,10 @@ import {
   type UserCredential,
 } from "firebase/auth";
 import { auth } from "@/lib/firebase-client";
-import { Button, Logo, textInputClass } from "@/components/ui";
+import { Button, Logo } from "@/components/ui";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   API_KEY_PROVIDERS,
   API_KEY_PROVIDER_META,
@@ -140,23 +143,23 @@ function LoginForm() {
             </p>
             <form onSubmit={saveKeysAndContinue} className="mt-5 flex flex-col gap-3">
               {API_KEY_PROVIDERS.map((provider) => (
-                <label key={provider} className="flex flex-col gap-1.5">
-                  <span className="text-sm font-medium">
+                <div key={provider} className="flex flex-col gap-1.5">
+                  <Label htmlFor={`signup-key-${provider}`}>
                     {API_KEY_PROVIDER_META[provider].label}
                     {provider === "gemini" && <span className="text-muted font-normal"> (or Anthropic)</span>}
                     {provider === "anthropic" && <span className="text-muted font-normal"> (or Gemini)</span>}
-                  </span>
-                  <input
+                  </Label>
+                  <Input
+                    id={`signup-key-${provider}`}
                     type="password"
                     value={keys[provider]}
                     onChange={(e) => setKeys((prev) => ({ ...prev, [provider]: e.target.value }))}
                     placeholder="Paste API key…"
                     autoComplete="off"
                     required={provider === "elevenlabs"}
-                    className={textInputClass}
                   />
                   <span className="text-xs text-muted">{API_KEY_PROVIDER_META[provider].hint}</span>
-                </label>
+                </div>
               ))}
 
               {keysError && <p className="text-sm text-danger">{keysError}</p>}
@@ -179,38 +182,27 @@ function LoginForm() {
         </div>
 
         <div className="rounded-2xl border border-border bg-card p-6 sm:p-8">
-          <div className="grid grid-cols-2 gap-2 mb-6 rounded-full bg-subtle p-1">
-            <button
-              type="button"
-              onClick={() => setMode("signin")}
-              className={`rounded-full py-1.5 text-sm font-medium transition-colors ${
-                mode === "signin" ? "bg-card shadow-sm" : "text-muted"
-              }`}
-            >
-              Sign in
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode("signup")}
-              className={`rounded-full py-1.5 text-sm font-medium transition-colors ${
-                mode === "signup" ? "bg-card shadow-sm" : "text-muted"
-              }`}
-            >
-              Create account
-            </button>
-          </div>
+          <Tabs value={mode} onValueChange={(value) => setMode(value as "signin" | "signup")} className="mb-6">
+            <TabsList className="w-full rounded-full bg-subtle p-1">
+              <TabsTrigger value="signin" className="rounded-full data-active:bg-card data-active:shadow-sm">
+                Sign in
+              </TabsTrigger>
+              <TabsTrigger value="signup" className="rounded-full data-active:bg-card data-active:shadow-sm">
+                Create account
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
 
           <form onSubmit={submit} className="flex flex-col gap-3">
-            <input
+            <Input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="Email"
               required
               autoComplete="email"
-              className={textInputClass}
             />
-            <input
+            <Input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -218,7 +210,6 @@ function LoginForm() {
               required
               minLength={6}
               autoComplete={mode === "signin" ? "current-password" : "new-password"}
-              className={textInputClass}
             />
 
             {mode === "signup" && (

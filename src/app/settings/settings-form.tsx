@@ -2,7 +2,12 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Button, textInputClass } from "@/components/ui";
+import { Button } from "@/components/ui";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { API_KEY_PROVIDERS, API_KEY_PROVIDER_META, hasRequiredApiKeys, type ApiKeyProvider } from "@/lib/api-key-providers";
 import { patchSettings } from "@/lib/settings-client";
 import type { UserSettings } from "@/lib/users";
@@ -16,46 +21,16 @@ function Banner({ tone, children }: { tone: "success" | "error"; children: React
   );
 }
 
-function Toggle({ checked, onChange, label, description }: {
-  checked: boolean;
-  onChange: (value: boolean) => void;
-  label: string;
-  description: string;
-}) {
+/** Thin wrapper so every settings section shares one shadcn Card layout. */
+function SectionCard({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      className="flex w-full items-start justify-between gap-4 text-left"
-    >
-      <span>
-        <span className="block text-sm font-medium">{label}</span>
-        <span className="block text-sm text-muted">{description}</span>
-      </span>
-      <span
-        className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
-          checked ? "bg-accent" : "bg-subtle border border-border-strong"
-        }`}
-      >
-        <span
-          className={`inline-block h-4.5 w-4.5 transform rounded-full bg-white shadow transition-transform ${
-            checked ? "translate-x-[22px]" : "translate-x-1"
-          }`}
-        />
-      </span>
-    </button>
-  );
-}
-
-function Card({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
-  return (
-    <section className="rounded-2xl border border-border bg-card p-6 sm:p-8">
-      <h2 className="text-lg font-semibold">{title}</h2>
-      {description && <p className="mt-1 text-sm text-muted">{description}</p>}
-      <div className="mt-5 flex flex-col gap-5">{children}</div>
-    </section>
+    <Card className="p-6 sm:p-8">
+      <CardHeader className="p-0">
+        <CardTitle className="text-lg">{title}</CardTitle>
+        {description && <CardDescription>{description}</CardDescription>}
+      </CardHeader>
+      <CardContent className="p-0 mt-5 flex flex-col gap-5">{children}</CardContent>
+    </Card>
   );
 }
 
@@ -159,47 +134,45 @@ export function SettingsForm({
   return (
     <div className="flex flex-col gap-6">
       {next && (
-        <div
-          className={`rounded-2xl border p-4 sm:p-5 flex items-center justify-between gap-4 ${
-            keysReady ? "border-success bg-success-soft" : "border-warning bg-warning-soft"
-          }`}
-        >
-          <p className="text-sm">
-            {keysReady
-              ? "All set — you can continue now."
-              : "Add an ElevenLabs key plus either a Gemini or an Anthropic key below to continue."}
-          </p>
-          {keysReady && (
-            <Button size="sm" onClick={() => router.push(next)}>
-              Continue
-            </Button>
-          )}
-        </div>
+        <Alert className={keysReady ? "border-success bg-success-soft" : "border-warning bg-warning-soft"}>
+          <AlertDescription className="flex items-center justify-between gap-4 text-foreground">
+            <span>
+              {keysReady
+                ? "All set — you can continue now."
+                : "Add an ElevenLabs key plus either a Gemini or an Anthropic key below to continue."}
+            </span>
+            {keysReady && (
+              <Button size="sm" onClick={() => router.push(next)}>
+                Continue
+              </Button>
+            )}
+          </AlertDescription>
+        </Alert>
       )}
 
-      <Card title="Profile">
+      <SectionCard title="Profile">
         <form onSubmit={saveProfile} className="flex flex-col gap-3">
-          <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium">Display name</span>
-            <input
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="display-name">Display name</Label>
+            <Input
+              id="display-name"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               placeholder="Your name"
-              className={textInputClass}
             />
-          </label>
-          <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium">Email</span>
-            <input value={email ?? ""} disabled className={`${textInputClass} opacity-60 cursor-not-allowed`} />
-          </label>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="email">Email</Label>
+            <Input id="email" value={email ?? ""} disabled className="opacity-60 cursor-not-allowed" />
+          </div>
           {profileState.message && <Banner tone={profileState.error ? "error" : "success"}>{profileState.message}</Banner>}
           <Button type="submit" size="sm" disabled={profileState.busy} className="self-start">
             {profileState.busy ? "Saving…" : "Save profile"}
           </Button>
         </form>
-      </Card>
+      </SectionCard>
 
-      <Card
+      <SectionCard
         title="AI API keys"
         description="This app has no shared fallback key — interviews, grading, and voice all run on your own keys. Keys are encrypted at rest and never shown again after saving."
       >
@@ -210,8 +183,8 @@ export function SettingsForm({
           return (
             <div key={provider} className="flex flex-col gap-2 border-b border-border pb-5 last:border-0 last:pb-0">
               <div>
-                <span className="block text-sm font-medium">{label.label}</span>
-                <span className="block text-sm text-muted">{label.hint}</span>
+                <Label htmlFor={`key-${provider}`}>{label.label}</Label>
+                <p className="text-sm text-muted">{label.hint}</p>
               </div>
               {current.isSet && (
                 <p className="text-sm text-muted">
@@ -219,13 +192,13 @@ export function SettingsForm({
                 </p>
               )}
               <div className="flex flex-col sm:flex-row gap-2">
-                <input
+                <Input
+                  id={`key-${provider}`}
                   type="password"
                   value={keyDrafts[provider]}
                   onChange={(e) => setKeyDrafts((prev) => ({ ...prev, [provider]: e.target.value }))}
                   placeholder={current.isSet ? "Replace key…" : "Paste API key…"}
                   autoComplete="off"
-                  className={textInputClass}
                 />
                 <div className="flex gap-2 shrink-0">
                   <Button
@@ -248,29 +221,32 @@ export function SettingsForm({
             </div>
           );
         })}
-      </Card>
+      </SectionCard>
 
-      <Card title="Privacy">
-        <Toggle
-          checked={settings.shareScoresPublicly}
-          onChange={togglePublicScores}
-          label="Share my scores publicly"
-          description="Let other users see your interview scores on a public leaderboard."
-        />
+      <SectionCard title="Privacy">
+        <div className="flex w-full items-start justify-between gap-4">
+          <Label htmlFor="share-scores" className="flex flex-col items-start gap-1 font-normal">
+            <span className="text-sm font-medium">Share my scores publicly</span>
+            <span className="text-sm text-muted">Let other users see your interview scores on a public leaderboard.</span>
+          </Label>
+          <Switch id="share-scores" checked={settings.shareScoresPublicly} onCheckedChange={togglePublicScores} />
+        </div>
         {privacyState.message && <Banner tone={privacyState.error ? "error" : "success"}>{privacyState.message}</Banner>}
         {privacyState.busy && <p className="text-sm text-muted">Saving…</p>}
-      </Card>
+      </SectionCard>
 
-      <Card title="Danger zone" description="Permanently delete your account and all associated data.">
-        <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium">Type <span className="font-mono">delete</span> to confirm</span>
-          <input
+      <SectionCard title="Danger zone" description="Permanently delete your account and all associated data.">
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="delete-confirm">
+            Type <span className="font-mono">delete</span> to confirm
+          </Label>
+          <Input
+            id="delete-confirm"
             value={deleteConfirm}
             onChange={(e) => setDeleteConfirm(e.target.value)}
             placeholder="delete"
-            className={textInputClass}
           />
-        </label>
+        </div>
         {deleteState.error && <Banner tone="error">{deleteState.error}</Banner>}
         <Button
           type="button"
@@ -282,7 +258,7 @@ export function SettingsForm({
         >
           {deleteState.busy ? "Deleting…" : "Delete my account"}
         </Button>
-      </Card>
+      </SectionCard>
     </div>
   );
 }

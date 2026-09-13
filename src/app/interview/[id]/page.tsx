@@ -7,6 +7,13 @@ import type { Problem } from "@/lib/problems";
 import type { ExecutionResult } from "@/lib/execute";
 import { LANGUAGES, type Language } from "@/lib/languages";
 import { Button, DifficultyBadge, Logo } from "@/components/ui";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { RunResultPanel } from "@/components/run-result";
 import { formatClock, timerConfigFromSearch, type TimerConfig } from "@/lib/timer";
 import { aiProviderFromSearch, aiProviderLabel, type AiProvider } from "@/lib/ai";
@@ -115,85 +122,37 @@ function LanguagePicker({
   onChange: (next: Language) => void;
   disabled?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
   const current = languages.find((lang) => lang.id === value) ?? languages[0];
-
-  useEffect(() => {
-    if (!open) return;
-    function onPointerDown(e: MouseEvent) {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
-    }
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open]);
-
   if (!current) return null;
 
   return (
-    <div className="relative" ref={rootRef}>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => setOpen((prev) => !prev)}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        className="flex items-center gap-2 rounded-full border border-border-strong bg-subtle pl-2.5 pr-2 py-1.5 text-sm font-medium hover:bg-border-strong/60 transition-colors"
-      >
-        <span
-          className="h-2 w-2 rounded-full shrink-0"
-          style={{ background: current.color }}
-          aria-hidden
-        />
-        {current.label}
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 12 12"
-          fill="none"
-          className={`text-muted transition-transform ${open ? "rotate-180" : ""}`}
-          aria-hidden
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          disabled={disabled}
+          className="flex items-center gap-2 rounded-full border border-border-strong bg-subtle pl-2.5 pr-2 py-1.5 text-sm font-medium hover:bg-border-strong/60 transition-colors"
         >
-          <path d="M2.5 4.5L6 8l3.5-3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </button>
-      {open && (
-        <div
-          role="listbox"
-          className="absolute left-0 top-[calc(100%+6px)] z-10 w-44 rounded-xl border border-border bg-card p-1 shadow-lg animate-fade-up"
-        >
-          {languages.map((lang) => (
-            <button
-              key={lang.id}
-              type="button"
-              role="option"
-              aria-selected={lang.id === value}
-              onClick={() => {
-                onChange(lang.id);
-                setOpen(false);
-              }}
-              className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm transition-colors ${
-                lang.id === value ? "bg-subtle font-medium" : "hover:bg-subtle"
-              }`}
-            >
-              <span
-                className="h-2 w-2 rounded-full shrink-0"
-                style={{ background: lang.color }}
-                aria-hidden
-              />
-              {lang.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
+          <span
+            className="h-2 w-2 rounded-full shrink-0"
+            style={{ background: current.color }}
+            aria-hidden
+          />
+          {current.label}
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="text-muted" aria-hidden>
+            <path d="M2.5 4.5L6 8l3.5-3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-44">
+        {languages.map((lang) => (
+          <DropdownMenuItem key={lang.id} onClick={() => onChange(lang.id)}>
+            <span className="h-2 w-2 rounded-full shrink-0" style={{ background: lang.color }} aria-hidden />
+            {lang.label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -915,7 +874,7 @@ export default function InterviewPage({
               sendMessage();
             }}
           >
-            <input
+            <Input
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
               disabled={submissionLocked || timeExpired}
@@ -926,7 +885,7 @@ export default function InterviewPage({
                     : "Listening — just start talking..."
                   : "Type your response..."
               }
-              className="flex-1 rounded-full border border-border-strong bg-transparent px-4 py-2 text-sm outline-none focus:border-accent transition-colors"
+              className="flex-1 rounded-full bg-transparent"
             />
             {micSupported && (
               <button

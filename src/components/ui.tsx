@@ -2,47 +2,57 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, type ButtonHTMLAttributes } from "react";
+import { useEffect, useState, type ComponentProps } from "react";
+import { Button as ShadcnButton } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 export const textInputClass =
   "w-full rounded-xl border border-border-strong bg-card px-4 py-2.5 text-sm outline-none focus:border-accent transition-colors";
 
-const buttonBase =
-  "inline-flex items-center justify-center gap-2 rounded-full font-medium transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.97]";
-
-const buttonVariants = {
-  primary:
-    "bg-accent text-accent-foreground hover:bg-accent-hover shadow-sm shadow-accent-soft",
-  secondary:
-    "border border-border-strong bg-card hover:bg-card-hover text-foreground",
-  ghost: "hover:bg-subtle text-foreground",
-  danger: "bg-danger text-white hover:opacity-90",
+/** This app's own variant/size vocabulary, mapped onto the shadcn Button underneath. */
+const variantMap = {
+  primary: "default",
+  secondary: "secondary",
+  ghost: "ghost",
+  danger: "destructive",
+  link: "link",
 } as const;
 
-const buttonSizes = {
-  // Every interactive size clears the ~44px comfortable-tap-target guideline (Fitts's Law).
-  sm: "text-sm px-3.5 py-2",
-  md: "text-sm px-5 py-2.5",
-  lg: "text-base px-7 py-3.5",
+const sizeMap = {
+  sm: "sm",
+  md: "default",
+  lg: "lg",
 } as const;
 
 type ButtonStyleProps = {
-  variant?: keyof typeof buttonVariants;
-  size?: keyof typeof buttonSizes;
+  variant?: keyof typeof variantMap;
+  size?: keyof typeof sizeMap;
   className?: string;
 };
 
-function buttonClassName({ variant = "primary", size = "md", className = "" }: ButtonStyleProps) {
-  return `${buttonBase} ${buttonVariants[variant]} ${buttonSizes[size]} ${className}`;
-}
-
 export function Button({
-  variant,
-  size,
+  variant = "primary",
+  size = "md",
   className,
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & ButtonStyleProps) {
-  return <button className={buttonClassName({ variant, size, className })} {...props} />;
+}: Omit<ComponentProps<typeof ShadcnButton>, "variant" | "size"> & ButtonStyleProps) {
+  return (
+    <ShadcnButton
+      variant={variantMap[variant]}
+      size={sizeMap[size]}
+      className={`rounded-full ${className ?? ""}`}
+      {...props}
+    />
+  );
 }
 
 export function LinkButton({
@@ -56,24 +66,23 @@ export function LinkButton({
   children: React.ReactNode;
 }) {
   return (
-    <Link href={href} className={buttonClassName({ variant, size, className })}>
-      {children}
-    </Link>
+    <Button variant={variant} size={size} className={className} asChild>
+      <Link href={href}>{children}</Link>
+    </Button>
   );
 }
 
-const difficultyTone: Record<string, string> = {
-  Easy: "text-success bg-success-soft",
-  Medium: "text-warning bg-warning-soft",
-  Hard: "text-danger bg-danger-soft",
+const difficultyBadgeClass: Record<string, string> = {
+  Easy: "!bg-success-soft !text-success",
+  Medium: "!bg-warning-soft !text-warning",
+  Hard: "!bg-danger-soft !text-danger",
 };
 
 export function DifficultyBadge({ level }: { level: string }) {
-  const tone = difficultyTone[level] ?? "text-muted bg-subtle";
   return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${tone}`}>
+    <Badge variant="secondary" className={difficultyBadgeClass[level] ?? "!bg-subtle !text-muted"}>
       {level}
-    </span>
+    </Badge>
   );
 }
 
@@ -81,8 +90,10 @@ export function DifficultyBadge({ level }: { level: string }) {
 export function UnavailableNotice({ title, message }: { title: string; message: string }) {
   return (
     <main className="flex-1 max-w-2xl w-full mx-auto px-6 py-16">
-      <h1 className="text-2xl font-bold mb-4">{title}</h1>
-      <p className="text-danger">{message}</p>
+      <Alert variant="destructive">
+        <AlertTitle className="text-base">{title}</AlertTitle>
+        <AlertDescription>{message}</AlertDescription>
+      </Alert>
     </main>
   );
 }
@@ -116,8 +127,6 @@ function UserMenu() {
   const router = useRouter();
   const [status, setStatus] = useState<"loading" | "anon" | "authed">("loading");
   const [email, setEmail] = useState<string | null>(null);
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -128,22 +137,6 @@ function UserMenu() {
       })
       .catch(() => setStatus("anon"));
   }, []);
-
-  useEffect(() => {
-    if (!open) return;
-    function onPointerDown(e: MouseEvent) {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
-    }
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open]);
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -162,42 +155,25 @@ function UserMenu() {
   }
 
   return (
-    <div className="relative" ref={rootRef}>
-      <button
-        type="button"
-        onClick={() => setOpen((prev) => !prev)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label="Account"
-        className="flex h-9 w-9 items-center justify-center rounded-full border border-border-strong bg-subtle text-muted hover:bg-border-strong/60 hover:text-foreground transition-colors"
-      >
-        <AccountIcon />
-      </button>
-      {open && (
-        <div
-          role="menu"
-          className="absolute right-0 top-full mt-2 w-56 rounded-xl border border-border bg-card shadow-lg py-1.5 z-10"
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label="Account"
+          className="flex h-9 w-9 items-center justify-center rounded-full border border-border-strong bg-subtle text-muted hover:bg-border-strong/60 hover:text-foreground transition-colors"
         >
-          <div className="px-3.5 py-2 text-sm text-muted truncate border-b border-border">{email}</div>
-          <Link
-            href="/settings"
-            role="menuitem"
-            onClick={() => setOpen(false)}
-            className="block w-full text-left px-3.5 py-2 text-sm hover:bg-subtle transition-colors"
-          >
-            Settings
-          </Link>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={logout}
-            className="w-full text-left px-3.5 py-2 text-sm hover:bg-subtle transition-colors"
-          >
-            Log out
-          </button>
-        </div>
-      )}
-    </div>
+          <AccountIcon />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuLabel className="truncate font-normal text-muted">{email}</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem asChild>
+          <Link href="/settings">Settings</Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={logout}>Log out</DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

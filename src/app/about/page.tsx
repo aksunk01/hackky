@@ -1,5 +1,6 @@
 import Image from "next/image";
-import { SiteHeader } from "@/components/ui";
+import { Button, SiteHeader } from "@/components/ui";
+import { Card, CardContent } from "@/components/ui/card";
 
 type Founder = {
   name: string;
@@ -54,30 +55,26 @@ export default function AboutPage() {
       <section className="px-6 pb-20">
         <div className="max-w-4xl mx-auto grid sm:grid-cols-2 gap-6">
           {FOUNDERS.map((f) => (
-            <div
-              key={f.name}
-              className="rounded-2xl border border-border bg-card p-6 flex items-center gap-4"
-            >
-              <Image
-                src={f.photo}
-                alt={f.name}
-                width={64}
-                height={64}
-                className="h-16 w-16 shrink-0 rounded-full object-cover"
-              />
-              <div className="flex flex-col gap-1 min-w-0">
-                <span className="font-semibold truncate">{f.name}</span>
-                <span className="text-sm text-muted">{f.role}</span>
-                <a
-                  href={f.linkedin}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm text-accent hover:underline w-fit"
-                >
-                  LinkedIn &rarr;
-                </a>
-              </div>
-            </div>
+            <Card key={f.name} className="p-6">
+              <CardContent className="p-0 flex items-center gap-4">
+                <Image
+                  src={f.photo}
+                  alt={f.name}
+                  width={64}
+                  height={64}
+                  className="h-16 w-16 shrink-0 rounded-full object-cover"
+                />
+                <div className="flex flex-col gap-1 min-w-0">
+                  <span className="font-semibold truncate">{f.name}</span>
+                  <span className="text-sm text-muted">{f.role}</span>
+                  <Button variant="link" size="sm" className="h-auto p-0 justify-start" asChild>
+                    <a href={f.linkedin} target="_blank" rel="noopener noreferrer">
+                      LinkedIn &rarr;
+                    </a>
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
           ))}
         </div>
       </section>

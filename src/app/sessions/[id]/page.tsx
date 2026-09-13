@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { SiteHeader } from "@/components/ui";
+import { SiteHeader, UnavailableNotice } from "@/components/ui";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { getCurrentUser } from "@/lib/auth";
 import { getSession } from "@/lib/interview-sessions";
 import { bandFor, bands, dimensions } from "@/lib/grading";
@@ -19,10 +20,10 @@ export default async function SavedReportPage({ params }: PageProps<"/sessions/[
     return (
       <>
         <SiteHeader />
-        <main className="flex-1 max-w-4xl w-full mx-auto px-6 py-16">
-          <h1 className="text-2xl font-bold mb-4">Report unavailable</h1>
-          <p className="text-danger">Could not load this report. Check the Firestore connection and refresh this page.</p>
-        </main>
+        <UnavailableNotice
+          title="Report unavailable"
+          message="Could not load this report. Check the Firestore connection and refresh this page."
+        />
       </>
     );
   }
@@ -69,9 +70,12 @@ export default async function SavedReportPage({ params }: PageProps<"/sessions/[
       </div>
 
       {session.mocked && (
-        <p className="rounded-lg border border-warning bg-warning-soft px-4 py-3 text-sm text-warning">
-          Demo-mode grading: the AI grader was unavailable, so only correctness (from the test run) is scored. The other areas are marked not assessed.
-        </p>
+        <Alert className="border-warning bg-warning-soft">
+          <AlertDescription className="!text-warning">
+            Demo-mode grading: the AI grader was unavailable, so only correctness (from the test run) is scored. The
+            other areas are marked not assessed.
+          </AlertDescription>
+        </Alert>
       )}
 
       <section className="rounded-2xl border border-border bg-card p-6">
