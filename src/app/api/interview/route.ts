@@ -5,8 +5,17 @@ import {
   languageLabel,
   type Language,
 } from "@/lib/languages";
-import { getProblem } from "@/lib/problems";
-import { generateText, isQuotaError, type ChatTurn } from "@/lib/gemini";
+import { getProblem } from "@/lib/problems-store";
+import type { Problem } from "@/lib/problems";
+import {
+  aiProviderLabel,
+  DEFAULT_AI_PROVIDER,
+  generateText,
+  isAiProvider,
+  isProviderQuotaError,
+  type AiProvider,
+  type ChatTurn,
+} from "@/lib/ai";
 import { mentionsComplexity } from "@/lib/grading";
 import type { ExecutionResult } from "@/lib/execute";
 import { looksRandom } from "@/lib/noise";
@@ -52,7 +61,7 @@ function isNoComment(reply: string): boolean {
 }
 
 /**
- * Scripted fallback used when a periodic check can't reach Gemini, so the
+ * Scripted fallback used when a periodic check can't reach the model, so the
  * feature is still visible without a key/quota. Deliberately carries no
  * "scripted" marker in its text: this reply is spoken by TTS, and the client
  * already shows a `mocked`/`reason` badge next to it.
@@ -140,7 +149,7 @@ function complexityDirective(turns: ChatTurn[], timer: TimerInfo | undefined): s
 }
 
 function buildSystemInstruction(
-  problem: NonNullable<ReturnType<typeof getProblem>>,
+  problem: Problem,
   code: string,
   testResult: ExecutionResult | null,
   language: Language,
@@ -239,7 +248,7 @@ ask about an edge case or the complexity. Don't repeat feedback you've already g
 
 export async function POST(request: Request) {
   const body = await request.json();
-  const { problemId, history, code, testResult, event, activity, language, timer } = body as {
+  const { problemId, history, code, testResult, event, activity, language, timer, provider } = body as {
     problemId?: string;
     history?: ChatTurn[];
     code?: string;
@@ -248,13 +257,15 @@ export async function POST(request: Request) {
     activity?: ActivitySinceLastCheck;
     language?: string;
     timer?: TimerInfo;
+    provider?: AiProvider;
   };
+  const aiProvider = isAiProvider(provider) ? provider : DEFAULT_AI_PROVIDER;
 
   if (!problemId) {
     return NextResponse.json({ error: "problemId is required." }, { status: 400 });
   }
 
-  const problem = getProblem(problemId);
+  const problem = await getProblem(problemId);
   if (!problem) {
     return NextResponse.json({ error: "Unknown problem." }, { status: 404 });
   }
@@ -287,6 +298,7 @@ export async function POST(request: Request) {
   let quotaHit = false;
   try {
     const reply = await generateText(
+      aiProvider,
       buildSystemInstruction(
         problem,
         code ?? "",
@@ -312,14 +324,14 @@ export async function POST(request: Request) {
       });
     }
   } catch (err) {
-    console.error("Gemini interview call failed, falling back to mock:", err);
+    console.error(`${aiProviderLabel(aiProvider)} interview call failed, falling back to mock:`, err);
     // A quota bounce is the common case, and it looks exactly like the
     // interviewer ignoring the candidate's code, so report which it was.
-    quotaHit = isQuotaError(err);
+    quotaHit = isProviderQuotaError(aiProvider, err);
   }
 
   // The periodic checker gets a scripted stand-in so it's visible in testing
-  // even without a working Gemini call — flagged `mocked` so the UI marks it
+  // even without a working model call — flagged `mocked` so the UI marks it
   // as such. Everything else stays quiet, since there's no canned line that
   // could reflect their code.
   if (event === "periodic-check") {
@@ -340,7 +352,7 @@ export async function POST(request: Request) {
   }
 
   // Cycles rather than clamping to the last entry: clamping meant a long
-  // interview without Gemini repeated one sentence on every single turn.
+  // interview without a working model call repeated one sentence on every single turn.
   const reply =
     userTurnCount === 0
       ? `Hi, I'm Alex, your interviewer today. Let's look at "${problem.title}". Take a look at the problem and tell me how you'd approach it.`

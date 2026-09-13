@@ -1,21 +1,23 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { SiteHeader } from "@/components/ui";
-import { getOwnerId } from "@/lib/owner-cookie";
+import { getCurrentUser } from "@/lib/auth";
 import { listSessions } from "@/lib/interview-sessions";
 import { bandFor } from "@/lib/grading";
 
 export default async function SessionsPage() {
-  const ownerId = await getOwnerId();
+  const user = await getCurrentUser();
+  if (!user) redirect("/login");
   let sessions;
   try {
-    sessions = ownerId ? await listSessions(ownerId) : [];
+    sessions = await listSessions(user.uid);
   } catch {
     return (
       <>
         <SiteHeader />
         <main className="flex-1 max-w-3xl w-full mx-auto px-6 py-16">
           <h1 className="text-2xl font-bold mb-4">Interview History</h1>
-          <p className="text-danger">History is unavailable. Check the MySQL connection and refresh this page.</p>
+          <p className="text-danger">History is unavailable. Check the Firestore connection and refresh this page.</p>
         </main>
       </>
     );
@@ -28,7 +30,7 @@ export default async function SessionsPage() {
       <div className="flex items-center justify-between gap-4 mb-8">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Interview History</h1>
-          <p className="text-sm text-muted">Completed interviews from this browser.</p>
+          <p className="text-sm text-muted">Completed interviews from your account.</p>
         </div>
         <Link href="/problems" className="text-sm text-accent hover:underline">Start another</Link>
       </div>

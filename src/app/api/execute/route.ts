@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isLanguage } from "@/lib/languages";
-import { getProblem } from "@/lib/problems";
+import { getProblem } from "@/lib/problems-store";
 import { runCode } from "@/lib/execute";
 
 export async function POST(request: Request) {
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unsupported language." }, { status: 400 });
   }
 
-  const problem = getProblem(problemId);
+  const problem = await getProblem(problemId);
   if (!problem) {
     return NextResponse.json({ error: "Unknown problem." }, { status: 404 });
   }

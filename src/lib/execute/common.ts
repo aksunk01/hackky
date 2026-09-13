@@ -57,6 +57,10 @@ export const EXEC_OPTIONS = {
   timeout: 5000,
   maxBuffer: 1024 * 1024,
 };
+export const COMPILE_OPTIONS = {
+  timeout: COMPILE_TIMEOUT_MS,
+  maxBuffer: EXEC_OPTIONS.maxBuffer,
+};
 
 const MAX_STDOUT_CHARS = 10_000;
 

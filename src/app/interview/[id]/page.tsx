@@ -3,12 +3,13 @@
 import { use, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import Editor from "@monaco-editor/react";
-import { getProblem } from "@/lib/problems";
+import type { Problem } from "@/lib/problems";
 import type { ExecutionResult } from "@/lib/execute";
 import { LANGUAGES, type Language } from "@/lib/languages";
 import { Button, DifficultyBadge, Logo } from "@/components/ui";
 import { RunResultPanel } from "@/components/run-result";
 import { formatClock, timerConfigFromSearch, type TimerConfig } from "@/lib/timer";
+import { aiProviderFromSearch, aiProviderLabel, type AiProvider } from "@/lib/ai";
 import { looksRandom } from "@/lib/noise";
 import {
   isInterviewerSpeaking,
@@ -42,6 +43,7 @@ type SubmissionSnapshot = {
   history: ChatTurn[];
   code: string;
   language: Language;
+  provider: AiProvider;
   startedAt: string;
 };
 
@@ -85,8 +87,8 @@ function getSearchServerSnapshot() {
 
 /**
  * Whether the editor has moved on enough to be worth an unprompted comment.
- * Deliberately conservative: every review costs a model call, and the free
- * Gemini tier runs out fast.
+ * Deliberately conservative: every review costs a model call, and Gemini's
+ * free tier runs out fast.
  */
 function hasMeaningfulChange(next: string, seen: string): boolean {
   const a = next.replace(/\s+/g, "");
@@ -198,18 +200,42 @@ export default function InterviewPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
-  const problem = getProblem(id);
   const router = useRouter();
+  const [problem, setProblem] = useState<Problem | null>(null);
+  const [problemStatus, setProblemStatus] = useState<"loading" | "found" | "not-found">("loading");
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/problems/${id}`)
+      .then((res) => {
+        if (res.status === 404) return null;
+        if (!res.ok) throw new Error("Failed to load problem.");
+        return res.json() as Promise<Problem>;
+      })
+      .then((data) => {
+        if (cancelled) return;
+        if (data) {
+          setProblem(data);
+          setProblemStatus("found");
+        } else {
+          setProblemStatus("not-found");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setProblemStatus("not-found");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
 
   // Only offer languages this problem actually has starter code for.
-  const availableLanguages = LANGUAGES.filter((lang) => problem?.starterCode[lang.id]);
-  const [language, setLanguage] = useState<Language>(
-    availableLanguages[0]?.id ?? "python"
-  );
+  const availableLanguages = problem
+    ? LANGUAGES.filter((lang) => problem.starterCode[lang.id])
+    : [];
+  const [language, setLanguage] = useState<Language>("python");
   // Kept per language so switching back doesn't throw away an attempt.
-  const [drafts, setDrafts] = useState<Partial<Record<Language, string>>>(
-    () => ({ ...problem?.starterCode })
-  );
+  const [drafts, setDrafts] = useState<Partial<Record<Language, string>>>({});
   const code = drafts[language] ?? "";
   const [messages, setMessages] = useState<ChatTurn[]>([]);
   const [chatInput, setChatInput] = useState("");
@@ -217,8 +243,8 @@ export default function InterviewPage({
   const [testResult, setTestResult] = useState<ExecutionResult | null>(null);
   const [running, setRunning] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [ownerReady, setOwnerReady] = useState(false);
-  const [ownerError, setOwnerError] = useState("");
+  const [authReady, setAuthReady] = useState(false);
+  const [authError, setAuthError] = useState("");
   const [submitError, setSubmitError] = useState("");
   const [submissionLocked, setSubmissionLocked] = useState(false);
   const micSupported = useSyncExternalStore(
@@ -243,6 +269,7 @@ export default function InterviewPage({
   // defaults to a free count-up clock when the interview was opened directly.
   const search = useSyncExternalStore(noSubscription, getSearchSnapshot, getSearchServerSnapshot);
   const timerConfig: TimerConfig = timerConfigFromSearch(search);
+  const aiProvider = aiProviderFromSearch(search);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const sessionStart = useRef(Date.now());
   const autoSubmitted = useRef(false);
@@ -251,7 +278,7 @@ export default function InterviewPage({
   const greeted = useRef(false);
   // The editor contents Alex has already commented on, so an idle review only
   // fires for code he hasn't seen.
-  const reviewedCode = useRef(problem?.starterCode[language] ?? "");
+  const reviewedCode = useRef("");
   // State, but read from timers and callbacks that mustn't wait for a render.
   const busy = useRef(false);
   const runningRef = useRef(false);
@@ -268,8 +295,22 @@ export default function InterviewPage({
   // render, so it reads these refs instead of the state captured at mount.
   const codeRef = useRef(code);
   const messagesRef = useRef(messages);
-  const codeAtLastCheck = useRef(problem?.starterCode[language] ?? "");
+  const codeAtLastCheck = useRef("");
   const talkedSinceLastCheck = useRef(false);
+  // Runs once, the render after the problem finishes loading: seeds the
+  // language, starter code, and idle-review baselines that used to be
+  // available synchronously before the problem fetch was async.
+  const problemInitialized = useRef(false);
+  useEffect(() => {
+    if (!problem || problemInitialized.current) return;
+    problemInitialized.current = true;
+    const initialLanguage =
+      LANGUAGES.find((lang) => problem.starterCode[lang.id])?.id ?? "python";
+    setLanguage(initialLanguage);
+    setDrafts({ ...problem.starterCode });
+    reviewedCode.current = problem.starterCode[initialLanguage] ?? "";
+    codeAtLastCheck.current = problem.starterCode[initialLanguage] ?? "";
+  }, [problem]);
   // Wall-clock start of the current silence window. Reset whenever Alex says
   // anything at all, so the check-in measures "two minutes since the last
   // thing either of us said" rather than ticking off a clock that started at
@@ -296,17 +337,22 @@ export default function InterviewPage({
 
   useEffect(() => {
     startedAtRef.current ??= new Date().toISOString();
-    void initializeOwner();
+    void checkAuth();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function initializeOwner() {
-    setOwnerError("");
+  async function checkAuth() {
+    setAuthError("");
     try {
-      const res = await fetch("/api/owner", { method: "POST" });
-      if (!res.ok) throw new Error("Owner setup failed.");
-      setOwnerReady(true);
+      const res = await fetch("/api/auth/me");
+      if (res.status === 401) {
+        router.push(`/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+        return;
+      }
+      if (!res.ok) throw new Error("Auth check failed.");
+      setAuthReady(true);
     } catch {
-      setOwnerError("Could not initialize interview history. Retry before submitting.");
+      setAuthError("Your session could not be verified. Retry, or sign in again.");
     }
   }
 
@@ -379,11 +425,11 @@ export default function InterviewPage({
     if (!timeExpired) return;
     deadlineReachedRef.current = true;
     stopSpeaking();
-    if (autoSubmitted.current || submittingRef.current || busy.current || runningRef.current || partial.trim() || !ownerReady) return;
+    if (autoSubmitted.current || submittingRef.current || busy.current || runningRef.current || partial.trim() || !authReady) return;
     autoSubmitted.current = true;
     void submitInterview();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timeExpired, ownerReady, chatBusy, running, partial, submitting]);
+  }, [timeExpired, authReady, chatBusy, running, partial, submitting]);
 
   useEffect(() => {
     if (!problem || !micSupported || !micOn || timeExpired) return;
@@ -449,7 +495,9 @@ export default function InterviewPage({
   if (!problem) {
     return (
       <main className="flex-1 flex items-center justify-center">
-        <p className="text-muted">Problem not found.</p>
+        <p className="text-muted">
+          {problemStatus === "loading" ? "Loading…" : "Problem not found."}
+        </p>
       </main>
     );
   }
@@ -485,6 +533,7 @@ export default function InterviewPage({
           history: options.history,
           code,
           language,
+          provider: aiProvider,
           testResult: options.result ?? testResult,
           event: options.event,
           activity: options.activity,
@@ -578,7 +627,7 @@ export default function InterviewPage({
   }
 
   async function submitInterview() {
-    if (submittingRef.current || busy.current || runningRef.current || partial.trim() || !ownerReady) return;
+    if (submittingRef.current || busy.current || runningRef.current || partial.trim() || !authReady) return;
     submittingRef.current = true;
     if (deadlineReachedRef.current) autoSubmitted.current = true;
     const snapshot = submissionRef.current ?? {
@@ -587,6 +636,7 @@ export default function InterviewPage({
       history: messages.map(({ role, text }) => ({ role, text })),
       code,
       language,
+      provider: aiProvider,
       runs: runCountRef.current,
       startedAt: startedAtRef.current ?? new Date().toISOString(),
     };
@@ -654,19 +704,19 @@ export default function InterviewPage({
             variant="danger"
             size="sm"
             onClick={submitInterview}
-            disabled={submitting || running || chatBusy || Boolean(partial.trim()) || !ownerReady}
+            disabled={submitting || running || chatBusy || Boolean(partial.trim()) || !authReady}
           >
             {submitting ? "Submitting…" : submissionLocked ? "Retry Submit" : "End & Submit"}
           </Button>
         </div>
       </header>
 
-      {(ownerError || submitError) && (
+      {(authError || submitError) && (
         <div className="px-4 py-2 text-sm text-danger border-b border-border shrink-0">
-          {ownerError && (
+          {authError && (
             <span>
-              {ownerError}{" "}
-              <button type="button" onClick={() => void initializeOwner()} className="underline">
+              {authError}{" "}
+              <button type="button" onClick={() => void checkAuth()} className="underline">
                 Retry setup
               </button>
             </span>
@@ -742,8 +792,8 @@ export default function InterviewPage({
                 <span
                   title={
                     demoReason === "quota"
-                      ? "Gemini free-tier quota is exhausted, so replies are scripted and don't reflect your code."
-                      : "No Gemini key, so replies are scripted and don't reflect your code."
+                      ? `${aiProviderLabel(aiProvider)} free-tier quota is exhausted, so replies are scripted and don't reflect your code.`
+                      : `No ${aiProviderLabel(aiProvider)} key, so replies are scripted and don't reflect your code.`
                   }
                   className="text-xs font-normal text-warning bg-warning-soft rounded-full px-2 py-0.5"
                 >

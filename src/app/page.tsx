@@ -1,5 +1,5 @@
 import { LinkButton, SiteHeader } from "@/components/ui";
-import { problems } from "@/lib/problems";
+import { getAllProblems } from "@/lib/problems-store";
 import { LANGUAGES } from "@/lib/languages";
 
 const FEATURES = [
@@ -44,7 +44,8 @@ const STEPS = [
   },
 ];
 
-export default function LandingPage() {
+export default async function LandingPage() {
+  const problems = await getAllProblems();
   return (
     <main className="flex-1 flex flex-col">
       <SiteHeader active="practice" />
@@ -169,7 +170,7 @@ export default function LandingPage() {
 
       <footer className="border-t border-border px-6 sm:px-8 py-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-sm text-muted">
         <span>InterviewAI</span>
-        <span>Practice interviews, powered by Gemini &amp; ElevenLabs.</span>
+        <span>Practice interviews, powered by Gemini, Claude &amp; ElevenLabs.</span>
       </footer>
     </main>
   );

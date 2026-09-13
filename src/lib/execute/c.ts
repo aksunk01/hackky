@@ -3,8 +3,7 @@ import path from "node:path";
 import type { Problem, ValueType } from "../problems";
 import {
   CASE_MARKER,
-  COMPILE_TIMEOUT_MS,
-  EXEC_OPTIONS,
+  COMPILE_OPTIONS,
   type ExecutionResult,
   type TypedProblem,
   crashedResult,
@@ -166,10 +165,7 @@ export async function runC(
     await writeFile(source, buildHarness(typed, candidateCode), "utf8");
 
     try {
-      await execFileAsync("gcc", ["-std=c11", "-O1", "-o", binary, source], {
-        timeout: COMPILE_TIMEOUT_MS,
-        maxBuffer: EXEC_OPTIONS.maxBuffer,
-      });
+      await execFileAsync("gcc", ["-std=c11", "-O1", "-o", binary, source], COMPILE_OPTIONS);
     } catch (err) {
       return crashedResult(problem, errorText(err));
     }
