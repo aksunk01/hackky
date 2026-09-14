@@ -156,3 +156,24 @@ async function clearLegacyDottedApiKeyFields(ref: FirebaseFirestore.DocumentRefe
 export async function deleteUserData(uid: string): Promise<void> {
   await getDb().collection(COLLECTION).doc(uid).delete();
 }
+
+export type PublicUser = { uid: string; displayName: string | null };
+
+/** Users currently opted in to public score sharing. */
+export async function listPublicUserIds(limit = 500): Promise<PublicUser[]> {
+  const snapshot = await getDb()
+    .collection(COLLECTION)
+    .where("shareScoresPublicly", "==", true)
+    .limit(limit)
+    .get();
+  return snapshot.docs.map((doc) => ({
+    uid: doc.id,
+    displayName: (doc.data().displayName as string | null | undefined) ?? null,
+  }));
+}
+
+/** Live opt-in check — never cache this, callers must re-check on every read of public data. */
+export async function isUserSharingPublicly(uid: string): Promise<boolean> {
+  const settings = await getUserSettings(uid);
+  return settings.shareScoresPublicly;
+}

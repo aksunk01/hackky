@@ -177,7 +177,7 @@ function UserMenu() {
   );
 }
 
-export function SiteHeader({ active }: { active?: "practice" | "about" }) {
+export function SiteHeader({ active }: { active?: "practice" | "leaderboard" | "about" }) {
   return (
     <header className="flex items-center justify-between px-6 sm:px-8 py-5 border-b border-border">
       <Logo />
@@ -192,6 +192,14 @@ export function SiteHeader({ active }: { active?: "practice" | "about" }) {
         </Link>
         <Link href="/sessions" className="text-muted hover:text-foreground transition-colors">
           History
+        </Link>
+        <Link
+          href="/leaderboard"
+          className={`transition-colors ${
+            active === "leaderboard" ? "text-foreground font-medium" : "text-muted hover:text-foreground"
+          }`}
+        >
+          Leaderboard
         </Link>
         <Link
           href="/about"
