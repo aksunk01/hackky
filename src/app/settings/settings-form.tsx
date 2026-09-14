@@ -15,6 +15,8 @@ import type { UserSettings } from "@/lib/users";
 type AsyncState = { busy: boolean; message: string | null; error: boolean };
 const IDLE: AsyncState = { busy: false, message: null, error: false };
 
+const DELETE_CONFIRM_PHRASE = "delete my account";
+
 function Banner({ tone, children }: { tone: "success" | "error"; children: React.ReactNode }) {
   return (
     <p className={`text-sm ${tone === "success" ? "text-success" : "text-danger"}`}>{children}</p>
@@ -238,13 +240,13 @@ export function SettingsForm({
       <SectionCard title="Danger zone" description="Permanently delete your account and all associated data.">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="delete-confirm">
-            Type <span className="font-mono">delete</span> to confirm
+            Type <span className="font-mono">{DELETE_CONFIRM_PHRASE}</span> to confirm
           </Label>
           <Input
             id="delete-confirm"
             value={deleteConfirm}
             onChange={(e) => setDeleteConfirm(e.target.value)}
-            placeholder="delete"
+            placeholder={DELETE_CONFIRM_PHRASE}
           />
         </div>
         {deleteState.error && <Banner tone="error">{deleteState.error}</Banner>}
@@ -252,7 +254,7 @@ export function SettingsForm({
           type="button"
           variant="danger"
           size="sm"
-          disabled={deleteConfirm.trim().toLowerCase() !== "delete" || deleteState.busy}
+          disabled={deleteConfirm.trim().toLowerCase() !== DELETE_CONFIRM_PHRASE || deleteState.busy}
           onClick={deleteAccount}
           className="self-start"
         >

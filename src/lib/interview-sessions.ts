@@ -8,6 +8,7 @@ import {
   type InterviewSession,
   type SessionSummary,
 } from "@/lib/interview-session-types";
+import { isUserSharingPublicly, type PublicUser } from "@/lib/users";
 
 const COLLECTION = "interview_sessions";
 
@@ -118,5 +119,82 @@ export async function saveCompletedSession(input: CompletedSessionInput): Promis
       throw new SessionConflictError("This report ID belongs to another submission.");
     }
   }
+}
+
+export type LeaderboardEntry = {
+  sessionId: string;
+  ownerId: string;
+  displayName: string | null;
+  problemTitle: string;
+  overallScore: number;
+};
+
+/** The only fields ever shown to the public: never leak transcript/evaluation text. */
+export type PublicSessionView = {
+  problemTitle: string;
+  overallScore: number;
+  testsPassed: number;
+  testsTotal: number;
+  completedAt: string;
+  finalCode: string;
+};
+
+/**
+ * Best score per opted-in user, optionally scoped to one problem. Firestore's
+ * `in` operator caps at 30 values, so `publicUsers` is queried in chunks;
+ * each chunk's page (ordered by score desc, capped at 50) is reduced to one
+ * entry per owner. This can under-rank a user with >50 sessions in the same
+ * chunk/filter — acceptable at current scale, not worth denormalizing for.
+ */
+export async function listLeaderboardEntries(opts: {
+  problemId?: string;
+  publicUsers: PublicUser[];
+  limit?: number;
+}): Promise<LeaderboardEntry[]> {
+  const { problemId, publicUsers, limit = 50 } = opts;
+  if (publicUsers.length === 0) return [];
+  const nameByUid = new Map(publicUsers.map((u) => [u.uid, u.displayName]));
+
+  const chunks: string[][] = [];
+  const ids = publicUsers.map((u) => u.uid);
+  for (let i = 0; i < ids.length; i += 30) chunks.push(ids.slice(i, i + 30));
+
+  const bestPerOwner = new Map<string, LeaderboardEntry>();
+  for (const chunk of chunks) {
+    let query = getDb().collection(COLLECTION).where("ownerId", "in", chunk) as FirebaseFirestore.Query;
+    if (problemId) query = query.where("problemId", "==", problemId);
+    const snapshot = await query.orderBy("overallScore", "desc").limit(50).get();
+    for (const doc of snapshot.docs) {
+      const data = doc.data() as SessionDoc;
+      if (bestPerOwner.has(data.ownerId)) continue;
+      bestPerOwner.set(data.ownerId, {
+        sessionId: doc.id,
+        ownerId: data.ownerId,
+        displayName: nameByUid.get(data.ownerId) ?? null,
+        problemTitle: data.problemTitle,
+        overallScore: data.overallScore,
+      });
+    }
+  }
+
+  return Array.from(bestPerOwner.values())
+    .sort((a, b) => b.overallScore - a.overallScore)
+    .slice(0, limit);
+}
+
+/** Returns the public subset of a session, or null if it doesn't exist or its owner isn't currently sharing. */
+export async function getPublicSession(id: string): Promise<PublicSessionView | null> {
+  const snapshot = await getDb().collection(COLLECTION).doc(id).get();
+  if (!snapshot.exists) return null;
+  const doc = snapshot.data() as SessionDoc;
+  if (!(await isUserSharingPublicly(doc.ownerId))) return null;
+  return {
+    problemTitle: doc.problemTitle,
+    overallScore: doc.overallScore,
+    testsPassed: doc.testsPassed,
+    testsTotal: doc.testsTotal,
+    completedAt: doc.completedAt,
+    finalCode: doc.finalCode,
+  };
 }
 
