@@ -35,6 +35,20 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000). Every page except the landing page and **About** requires an account — you'll be redirected to **Log in** first.
 
+### Run with Docker
+
+If you'd rather not install Node locally, or want a guaranteed-consistent environment across contributors:
+
+```bash
+cp env.local.example .env
+# fill in .env as described above
+docker compose up
+```
+
+Open [http://localhost:3000](http://localhost:3000). The container runs `npm run dev` with your local source mounted in, so edits on your machine hot-reload inside the container. `node_modules` and `.next` live inside the container (not synced from the host) to avoid platform mismatches.
+
+Stop it with `docker compose down`.
+
 ## Login (Firebase Auth)
 
 Accounts are email/password or Google sign-in via Firebase Auth. A signed server session cookie (not the raw Firebase ID token) is what actually gates access — see `src/middleware.ts`, `/api/auth/session`, and `src/lib/auth.ts`.
