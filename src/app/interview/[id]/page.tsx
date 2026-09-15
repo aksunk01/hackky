@@ -44,6 +44,8 @@ type InterviewReply = {
   /** Set when the reply came from the periodic direction check rather than the conversation. */
   checkIn?: boolean;
   reason?: string;
+  /** Set when the candidate just asked, in so many words, to end the interview. */
+  endRequested?: boolean;
 };
 
 type SubmissionSnapshot = {
@@ -250,6 +252,10 @@ export default function InterviewPage({
   const runCountRef = useRef(0);
   const startedAtRef = useRef<string | null>(null);
   const submissionRef = useRef<SubmissionSnapshot | null>(null);
+  // Set when Alex has just told the candidate the interview is ending, so
+  // submission can wait for his closing line to actually finish playing
+  // instead of cutting it off mid-sentence.
+  const endInterviewRequested = useRef(false);
   // The listener is started once and outlives many renders, so its callback has
   // to reach the current sendMessage rather than the one captured at start.
   const sendMessageRef = useRef<(text: string) => void>(() => {});
@@ -299,6 +305,11 @@ export default function InterviewPage({
   // or an actual tab close/refresh — always finalizes against the latest
   // code/messages instead of whatever was current when the listener was set up.
   const finalizeOnLeaveRef = useRef<() => void>(() => {});
+  // Same reason again: the end-of-interview timeout/effect below fires well
+  // after the render that scheduled it, so it must call through a ref rather
+  // than the submitInterview closure captured at that render — otherwise it
+  // would submit a snapshot missing Alex's own closing message.
+  const submitInterviewRef = useRef<() => Promise<void>>(async () => {});
 
   useEffect(() => {
     finalizeOnLeaveRef.current = () => {
@@ -386,6 +397,15 @@ export default function InterviewPage({
 
   useEffect(() => {
     interviewerSpeakingRef.current = interviewerSpeaking;
+  }, [interviewerSpeaking]);
+
+  // Once Alex's closing line stops playing, actually end the session — this
+  // is the only thing that consumes endInterviewRequested, so submission
+  // happens right after the candidate hears the acknowledgment, not mid-word.
+  useEffect(() => {
+    if (interviewerSpeaking || !endInterviewRequested.current) return;
+    endInterviewRequested.current = false;
+    void submitInterviewRef.current();
   }, [interviewerSpeaking]);
 
   // Every couple of minutes, independent of whether anything else prompted a
@@ -485,6 +505,10 @@ export default function InterviewPage({
   });
 
   useEffect(() => {
+    submitInterviewRef.current = submitInterview;
+  });
+
+  useEffect(() => {
     if (!problem || greeted.current) return;
     greeted.current = true;
     void askInterviewer({ history: [] });
@@ -538,8 +562,15 @@ export default function InterviewPage({
     // the start of his reply.
     setInterviewerBusy(true);
     // Whatever is in the editor now is what he's being asked about, even if the
-    // call fails — otherwise a failed review retries every keystroke.
-    reviewedCode.current = code;
+    // call fails — otherwise a failed review retries every keystroke. Skipped
+    // for the opening greeting (empty history, no event): `code` is still ""
+    // there because `setDrafts` from the problem-init effect hasn't re-rendered
+    // yet, and stomping the correct starter-code baseline with "" made the idle
+    // review fire on starter code moments after the greeting, as if it were a
+    // real edit.
+    if (options.history.length > 0 || options.event) {
+      reviewedCode.current = code;
+    }
     try {
       const res = await fetch("/api/interview", {
         method: "POST",
@@ -576,6 +607,19 @@ export default function InterviewPage({
       // request) the moment it's called, so clearing busy right after — even
       // though speak() is still running in the background — leaves no gap.
       if (voiceOn) speak(data.reply);
+      if (data.endRequested) {
+        endInterviewRequested.current = true;
+        // With voice off, interviewerSpeaking never flips true→false to fire
+        // the effect that watches for it, so there's nothing to end the wait
+        // — submit directly, just late enough for the closing line to render.
+        if (!voiceOn) {
+          setTimeout(() => {
+            if (!endInterviewRequested.current) return;
+            endInterviewRequested.current = false;
+            void submitInterviewRef.current();
+          }, 1500);
+        }
+      }
     } finally {
       busy.current = false;
       setChatBusy(false);
